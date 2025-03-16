@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "webhandler"
+version = "0.1.0"
+description = "WebScraping classes to get data from different websites"
+readme = "README.md"
+authors = [
+    { name = "sitscholl", email = "tscholl.simon@gmail.com" }
+]
+license = { text = "MIT" }
+dependencies = [
+    "selenium==4.29.0"
+]
+requires-python = ">=3.12"
+
+[tool.setuptools.packages.find]
+where = ["."]
