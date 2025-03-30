@@ -1,5 +1,6 @@
 import time
 import datetime
+from datetime import timedelta
 import time
 import sys
 from pathlib import Path
@@ -86,18 +87,33 @@ def validate_date(date, target_format = "%d.%m.%Y"):
     except ValueError:
         raise ValueError(f'Start date needs to be in {target_format} format. Got {date}')
 
-def split_dates(start: datetime.datetime, end: datetime.datetime, target_format: str = "%d.%m.%Y"):
+def split_dates(start_date, end_date, n_days = 7):
+    """
+    Create a list of (start, end) date tuples that each span n_days, 
+    covering the period from start_date to end_date.
+    
+    Parameters:
+    - start_date: A date object or a string in "YYYY-MM-DD" format.
+    - end_date: A date object or a string in "YYYY-MM-DD" format.
+    - n_days: Number of days in each interval.
+    
+    Returns:
+    - List of tuples, where each tuple is (start_date, end_date) for that interval.
+    """
 
-    if end < start:
-        raise ValueError(f"Start date cannot be smaller than end date. Got {start} and {end}")
+    if end_date < start_date:
+        raise ValueError(f"Start date cannot be smaller than end date. Got {start_date} and {end_date}")
 
-    if start.year != end.year:
-        return(
-            [start.strftime(target_format), datetime.datetime(start.year, 12, 31).strftime(target_format)],
-            [datetime.datetime(end.year, 1, 1).strftime(target_format), end.strftime(target_format)]
-        )
-    else:
-        return([start.strftime(target_format), end.strftime(target_format)])
+    date_pairs = []
+    current_start = start_date
+
+    while current_start <= end_date:
+        potential_end = current_start + timedelta(days=n_days - 1)
+        current_end = min(potential_end, end_date)
+        date_pairs.append((current_start, current_end))
+        current_start = current_end + timedelta(days=1)
+    
+    return date_pairs
 
 @contextmanager
 def temporary_implicit_wait(driver, wait_time):
