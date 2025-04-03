@@ -10,26 +10,37 @@ from webhandler.utils import split_dates
 logger = logging.getLogger(__name__)
 
 class SBR:
+    """
+    A class to interact with the SBR (Beratungsring) website for retrieving weather station data.
+    Handles login, session management, and data extraction.
+    """
     base_url = "https://www3.beratungsring.org"
     login_url = base_url + "/mein-sbr/login"
     stationdata_url = base_url + "/wetterstationen-custom"
     user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 
-    def __init__(self, username, password):
+    def __init__(self, username: str, password: str):
         self.username = username
         self.password = password
         self._session = None
 
     def __enter__(self):
-        # Allows the object to be used in a 'with' block
+        """
+        Allows the object to be used in a 'with' block.
+        """
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        # Ensure the session is closed when exiting the block
+        """
+        Ensure the session is closed when exiting the 'with' block.
+        """
         self.close_session()   
 
     @property
     def session(self):
+        """
+        Manages the session with the SBR website, handling login if necessary.
+        """
 
         if self._session is None:
             self._session = requests.Session()
@@ -60,13 +71,31 @@ class SBR:
                 logger.debug('Login successful!')
 
         return self._session
-    
+
     def close_session(self):
+        """
+        Closes the current session if it exists.
+        """
         if self._session is not None:
             self._session.close()
             self._session = None
 
-    def _extract_data_from_response(self, text, pattern = r'let\s+dataSetOnLoad\s*=\s*prepareDataset\(\[\[(\{.*?\})\]\]\);', n_group = 1):
+    def _extract_data_from_response(
+        self,
+        text: str,
+        pattern: str = r"let\s+dataSetOnLoad\s*=\s*prepareDataset\(\[\[(\{.*?\})\]\]\);",
+        n_group: int = 1,
+    ) -> list[dict]:
+        """
+        Extracts data from the HTML response text based on a given pattern.
+
+        Args:
+            text (str): The HTML response text.
+            pattern (str): The regex pattern to search for.
+            n_group (int): The group number to extract from the regex match.
+        Returns:
+            list: A list of dictionaries, where each dictionary represents a row of data.
+        """
         p_match = re.search(pattern, text, re.DOTALL)
         if not p_match:
             raise ValueError(f"Could not find pattern {pattern} in the text.")
@@ -80,7 +109,16 @@ class SBR:
             rows.append(row)
         return rows
 
-    def _get_formatted_tbl(self, rows):
+    def _get_formatted_tbl(self, rows: list[dict]) -> pd.DataFrame:
+        """
+        Formats the extracted data into a pandas DataFrame.
+
+        Args:
+            rows (list): A list of dictionaries, where each dictionary represents a row of data.
+
+        Returns:
+            pd.DataFrame: A pandas DataFrame containing the formatted data.
+        """
         tbl = pd.DataFrame.from_dict(rows)
         tbl.rename(columns = lambda x: x.strip('"'), inplace = True)
         tbl.rename(columns = lambda x: sbr_colmap[x]['kuerzel_de'] if x in sbr_colmap.keys() else x, inplace = True)
@@ -95,8 +133,22 @@ class SBR:
 
         tbl['Datum'] = tbl['Datum'].map(lambda x: datetime.datetime.fromtimestamp(int(x)))
         return tbl
-                        
-    def get_stationdata(self, station_id: int, start: datetime.datetime, end: datetime.datetime, type = 'meteo', sleep = 1):
+
+    def get_stationdata(self, station_id: int, start: datetime.datetime, end: datetime.datetime, type: str = 'meteo', sleep: int = 1) -> pd.DataFrame:
+        """
+        Retrieves weather station data for a given station ID and date range.
+
+        Args:
+            station_id (int): The ID of the weather station.
+            start (datetime.datetime): The start date and time.
+            end (datetime.datetime): The end date and time.
+            type (str): The type of data to retrieve (default: 'meteo'). Can be one of 'meteo' or 'schorf'
+            sleep (int): The time to sleep between requests (in seconds).
+
+        Returns:
+            pd.DataFrame: A pandas DataFrame containing the weather station data.
+
+        """
 
         if isinstance(station_id, str):
             station_id = int(station_id)
@@ -133,5 +185,5 @@ class SBR:
             tbl.append(self._get_formatted_tbl(rows))
 
             time.sleep(sleep) #avoid too many requests in short time
-        
+
         return(pd.concat(tbl))
