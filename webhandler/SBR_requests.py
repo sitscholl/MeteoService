@@ -109,6 +109,18 @@ class SBR:
             rows.append(row)
         return rows
 
+    def _assign_dtype(self, tbl: pd.DataFrame) -> pd.DataFrame:
+        tbl_re = tbl.copy()
+        for col in tbl_re:
+            unit = sbr_colmap.get(col, {'einheit': ''})['einheit']
+            if unit in ['mm', 'degC', '%', 'm*s-1']:
+                tbl_re[col] = tbl_re[col].astype(float)
+            elif unit == 'Ein/Aus':
+                tbl_re[col] = tbl_re[col].astype(bool)
+            else:
+                tbl_re[col] = tbl_re[col].astype(str)
+        return tbl_re
+
     def _get_formatted_tbl(self, rows: list[dict]) -> pd.DataFrame:
         """
         Formats the extracted data into a pandas DataFrame.
@@ -121,6 +133,7 @@ class SBR:
         """
         tbl = pd.DataFrame.from_dict(rows)
         tbl.rename(columns = lambda x: x.strip('"'), inplace = True)
+        tbl = self._assign_dtype(tbl)
         tbl.rename(columns = lambda x: sbr_colmap[x]['kuerzel_de'] if x in sbr_colmap.keys() else x, inplace = True)
         tbl.rename(columns = {'x': 'Datum'}, inplace = True)
 
@@ -185,5 +198,4 @@ class SBR:
             tbl.append(self._get_formatted_tbl(rows))
 
             time.sleep(sleep) #avoid too many requests in short time
-
         return(pd.concat(tbl))

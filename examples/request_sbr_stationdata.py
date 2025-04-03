@@ -20,3 +20,4 @@ with SBR(args.username, args.password) as client:
     
 print(data)
 print(data.shape)
+print(data.dtypes)
