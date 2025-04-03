@@ -107,11 +107,14 @@ def split_dates(start_date, end_date, n_days = 7):
     date_pairs = []
     current_start = start_date
 
-    while current_start <= end_date:
-        potential_end = current_start + timedelta(days=n_days - 1)
+    date_pairs = []
+    current_start = start_date
+    
+    while current_start < end_date:
+        potential_end = current_start + timedelta(days=n_days)
         current_end = min(potential_end, end_date)
         date_pairs.append((current_start, current_end))
-        current_start = current_end + timedelta(days=1)
+        current_start = current_end
     
     return date_pairs
 
