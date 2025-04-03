@@ -3,7 +3,9 @@ import logging
 import datetime
 import pandas as pd
 import re
+import time
 from webhandler.config import sbr_colmap
+from webhandler.utils import split_dates
 
 logger = logging.getLogger(__name__)
 
@@ -94,23 +96,12 @@ class SBR:
         tbl['Datum'] = tbl['Datum'].map(lambda x: datetime.datetime.fromtimestamp(int(x)))
         return tbl
                         
-    def get_stationdata(self, station_id: int, start: datetime.datetime, end: datetime.datetime, type = 'meteo'):
+    def get_stationdata(self, station_id: int, start: datetime.datetime, end: datetime.datetime, type = 'meteo', sleep = 1):
 
         if isinstance(station_id, str):
             station_id = int(station_id)
         if end < start:
             raise ValueError(f'End date must be smaller than start date. Got {start} - {end}')
-
-        # Make the GET request
-        data_params = {
-            "web_page": f"user-stations/{station_id}",
-            "graphType": type,
-            "skippath": "1",
-            "id": "/wetterstationen-custom",
-            "LANG": "",
-            "datefrom": f"{start:%Y.%m.%d %H:%M}",
-            "dateto": f"{end:%Y.%m.%d %H:%M}",
-        }
 
         data_headers = {
             "User-Agent": self.user_agent,
@@ -119,9 +110,28 @@ class SBR:
             "Accept-Language": "en-US,en;q=0.9"
         }
 
-        response = self.session.get(self.stationdata_url, params=data_params, headers=data_headers) 
+        dates_split = split_dates(start, end, n_days = 7)
 
-        logger.debug(f"Response url: {response.request.url}")
+        tbl = []
+        for start_date, end_date in dates_split:
+            # Make the GET request
+            data_params = {
+                "web_page": f"user-stations/{station_id}",
+                "graphType": type,
+                "skippath": "1",
+                "id": "/wetterstationen-custom",
+                "LANG": "",
+                "datefrom": f"{start_date:%Y.%m.%d %H:%M}",
+                "dateto": f"{end_date:%Y.%m.%d %H:%M}",
+            }
 
-        rows = self._extract_data_from_response(response.text)
-        return self._get_formatted_tbl(rows) 
+            response = self.session.get(self.stationdata_url, params=data_params, headers=data_headers) 
+
+            logger.debug(f"Response url: {response.request.url}")
+
+            rows = self._extract_data_from_response(response.text)
+            tbl.append(self._get_formatted_tbl(rows))
+
+            time.sleep(sleep) #avoid too many requests in short time
+        
+        return(pd.concat(tbl))
