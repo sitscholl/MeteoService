@@ -1,12 +1,16 @@
 import requests
 import logging
 import datetime
+import pandas as pd
+import re
+from webhandler.config import sbr_colmap
 
 logger = logging.getLogger(__name__)
 
 class SBR:
-    login_url = "https://www3.beratungsring.org/mein-sbr/login"
-    stationdata_url = "https://www3.beratungsring.org/wetterstationen-custom"
+    base_url = "https://www3.beratungsring.org"
+    login_url = base_url + "/mein-sbr/login"
+    stationdata_url = base_url + "/wetterstationen-custom"
     user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 
     def __init__(self, username, password):
@@ -59,8 +63,38 @@ class SBR:
         if self._session is not None:
             self._session.close()
             self._session = None
-            
-    def get_stationdata(self, station_id: int, start: datetime.datetime, end: datetime.datetime):
+
+    def _extract_data_from_response(self, text, pattern = r'let\s+dataSetOnLoad\s*=\s*prepareDataset\(\[\[(\{.*?\})\]\]\);', n_group = 1):
+        p_match = re.search(pattern, text, re.DOTALL)
+        if not p_match:
+            raise ValueError(f"Could not find pattern {pattern} in the text.")
+
+        text = p_match.group(n_group)
+        data = [i.strip('}').strip('{').split(',') for i in text.split('},{')]
+
+        rows = []
+        for n in data:
+            row = {j.split(':')[0]: j.split(':')[1] for j in n}
+            rows.append(row)
+        return rows
+
+    def _get_formatted_tbl(self, rows):
+        tbl = pd.DataFrame.from_dict(rows)
+        tbl.rename(columns = lambda x: x.strip('"'), inplace = True)
+        tbl.rename(columns = lambda x: sbr_colmap[x]['kuerzel_de'] if x in sbr_colmap.keys() else x, inplace = True)
+        tbl.rename(columns = {'x': 'Datum'}, inplace = True)
+
+        if 'create_time' in tbl.columns:
+            tbl['create_time'] = tbl['create_time'].map(lambda x: datetime.datetime.fromtimestamp(int(x)))
+        if 'rainStart' in tbl.columns:
+            tbl['rainStart'] = tbl['rainStart'].map(lambda x: x.strip('"'))
+            tbl['rainStart'] = pd.to_datetime(tbl['rainStart'], format = '%Y-%m-%d %H')
+        tbl['station_id'] = tbl['station_id'].map(lambda x: x.strip('"')) 
+
+        tbl['Datum'] = tbl['Datum'].map(lambda x: datetime.datetime.fromtimestamp(int(x)))
+        return tbl
+                        
+    def get_stationdata(self, station_id: int, start: datetime.datetime, end: datetime.datetime, type = 'meteo'):
 
         if isinstance(station_id, str):
             station_id = int(station_id)
@@ -70,7 +104,7 @@ class SBR:
         # Make the GET request
         data_params = {
             "web_page": f"user-stations/{station_id}",
-            "graphType": "meteo",
+            "graphType": type,
             "skippath": "1",
             "id": "/wetterstationen-custom",
             "LANG": "",
@@ -85,4 +119,9 @@ class SBR:
             "Accept-Language": "en-US,en;q=0.9"
         }
 
-        return self.session.get(self.stationdata_url, params=data_params, headers=data_headers)       
+        response = self.session.get(self.stationdata_url, params=data_params, headers=data_headers) 
+
+        logger.debug(f"Response url: {response.request.url}")
+
+        rows = self._extract_data_from_response(response.text)
+        return self._get_formatted_tbl(rows) 
