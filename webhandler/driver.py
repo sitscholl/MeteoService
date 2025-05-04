@@ -43,7 +43,7 @@ class Driver:
         self.user_dir = user_dir
         self.headless = headless
         self.simulate_slow_conn = simulate_slow_conn
-        self.driver: webdriver | None = None
+        self.driver = None
         
     def _configure_options(self) -> Options:
         """Configure and return Chrome options.
@@ -115,7 +115,7 @@ class Driver:
                 )
             
             # Set implicit wait timeout
-            self.driver.implicitly_wait(30)
+            # self.driver.implicitly_wait(30)
 
             logger.info("Chrome driver initialized successfully")
 
