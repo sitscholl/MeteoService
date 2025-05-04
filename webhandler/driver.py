@@ -39,8 +39,8 @@ class Driver:
             headless: Whether to run Chrome in headless mode
             simulate_slow_conn: Whether to simulate slow network conditions
         """
-        self.download_dir = str(Path(download_dir).absolute()) if download_dir else None
-        self.user_dir = str(Path(user_dir).absolute()) if user_dir else None
+        self.download_dir = download_dir
+        self.user_dir = user_dir
         self.headless = headless
         self.simulate_slow_conn = simulate_slow_conn
         self.driver: webdriver | None = None
