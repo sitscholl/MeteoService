@@ -83,7 +83,7 @@ class SBR:
     def _extract_data_from_response(
         self,
         text: str,
-        pattern: str = r"let\s+dataSetOnLoad\s*=\s*prepareDataset\(\[\[(\{.*?\})\]\]\);",
+        pattern: str = r"let\s+dataSetOnLoad\s*=\s*prepareDataset\(\[\[(\{.*?\})\]\]",
         n_group: int = 1,
     ) -> list[dict]:
         """
