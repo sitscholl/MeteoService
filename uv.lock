@@ -3,27 +3,6 @@ revision = 1
 requires-python = ">=3.12"
 
 [[package]]
-name = "2025-03-webhandler"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "pandas" },
-    { name = "pytz" },
-    { name = "requests" },
-    { name = "selenium" },
-    { name = "webdriver-manager" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "pandas", specifier = ">=2.2.3" },
-    { name = "pytz", specifier = ">=2025.2" },
-    { name = "requests", specifier = ">=2.32.3" },
-    { name = "selenium", specifier = ">=4.31.0" },
-    { name = "webdriver-manager", specifier = ">=4.0.2" },
-]
-
-[[package]]
 name = "attrs"
 version = "25.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -384,6 +363,27 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/24/4f/6e44478908c5133f680378d687f14ecaa99feed2c535344fcf68d8d21500/webdriver_manager-4.0.2.tar.gz", hash = "sha256:efedf428f92fd6d5c924a0d054e6d1322dd77aab790e834ee767af392b35590f", size = 25940 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b5/b5/3bd0b038d80950ec13e6a2c8d03ed8354867dc60064b172f2f4ffac8afbe/webdriver_manager-4.0.2-py2.py3-none-any.whl", hash = "sha256:75908d92ecc45ff2b9953614459c633db8f9aa1ff30181cefe8696e312908129", size = 27778 },
+]
+
+[[package]]
+name = "webhandler"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "pandas" },
+    { name = "pytz" },
+    { name = "requests" },
+    { name = "selenium" },
+    { name = "webdriver-manager" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pandas", specifier = ">=2.2.3" },
+    { name = "pytz", specifier = ">=2025.2" },
+    { name = "requests", specifier = ">=2.32.3" },
+    { name = "selenium", specifier = ">=4.31.0" },
+    { name = "webdriver-manager", specifier = ">=4.0.2" },
 ]
 
 [[package]]
