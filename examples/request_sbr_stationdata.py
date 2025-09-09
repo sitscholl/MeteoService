@@ -1,7 +1,7 @@
 """
 This script shows how to retrieve meteorological data from a specific station using the SBR API.
 """
-from webhandler.SBR_requests import SBR
+from webhandler.meteo.SBR import SBR
 import datetime
 import argparse
 
