@@ -11,10 +11,10 @@ parser.add_argument('password', help = 'password')
 args = parser.parse_args()
 
 with SBR(args.username, args.password) as client:
-    data = client.get_stationdata(
+    data = client.run(
         station_id="103",
-        start=datetime.datetime(2025, 3, 20, 0, 0),
-        end=datetime.datetime(2025, 4, 2, 14, 0),
+        start=datetime.datetime(2025, 9, 1, 0, 0),
+        end=datetime.datetime(2025, 9, 9, 14, 0),
         type = 'meteo'
     )
     
