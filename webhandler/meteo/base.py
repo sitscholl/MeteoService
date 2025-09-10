@@ -3,6 +3,8 @@ import pandas as pd
 import pandera.pandas as pa
 from typing import Any, Dict, Optional
 
+from webandler.db import MeteoDB
+
 class BaseMeteoHandler(ABC):
     """
     Abstract base class for meteorological data handlers.
@@ -92,7 +94,14 @@ class BaseMeteoHandler(ABC):
         """
         return self.output_schema.validate(transformed_data)
 
-    def save(self, validated_data: pd.DataFrame, output_path: Optional[str] = None) -> None:
+    def save(
+        self, 
+        validated_data: pd.DataFrame,
+        output_path: Optional[str],
+        measurement: str,
+        tags: Dict[str, Any] | None = None,
+        fields: List[str] | None = None,
+        skip_existing = True) -> Dict[str, int]:
         """
         Save the validated data to a database
                 
@@ -100,7 +109,23 @@ class BaseMeteoHandler(ABC):
             validated_data (pd.DataFrame): Validated data to save
             output_path (Optional[str]): Path where to save the data
         """
-        pass
+        with MeteoDB(output_path) as db:
+
+            insert_stats = db.insert_data(
+                validated_data, 
+                measurement=measurement, 
+                tags=tags, 
+                fields=fields,
+                skip_existing = skip_existing
+                )
+                
+            logger.info(f"""
+                    Inserted {insert_stats['inserted']} rows into database, 
+                    skipped {insert_stats['skipped']} rows 
+                    and failed at {insert_stats['errors']} rows.
+                """)
+                
+        return insert_stats
 
     def run(self, drop_columns = False, **kwargs) -> pd.DataFrame:
         """
