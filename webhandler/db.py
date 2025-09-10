@@ -5,6 +5,7 @@ from datetime import datetime
 from numbers import Number
 import logging
 import pytz
+from typing import Optional, Dict, List, Any
 
 logger = logging.getLogger(__name__)
 
@@ -15,80 +16,223 @@ class MeteoDB:
     def __init__(self, path: str):
         self.db = TinyFlux(path)
 
-    def insert_data(self, data: pd.DataFrame, measurement: str, tags: dict, fields: list[str] | None = None, skip_existing: bool = False):
+    def insert_data(self,
+                   data: pd.DataFrame,
+                   measurement: str,
+                   tags: Dict[str, Any],
+                   fields: Optional[List[str]] = None,
+                   skip_existing: bool = False):
+        """
+        Insert DataFrame data into the database.
 
-        if data is not None and len(data) > 0:
-            for _, row in data.iterrows():
+        Args:
+            data: DataFrame with 'datetime' column and measurement fields
+            measurement: Measurement name (e.g., 'SBR')
+            tags: Tags to apply to all points (e.g., {'station_id': '103'})
+            fields: Specific fields to include (None = all except datetime)
+            skip_existing: Skip duplicate entries instead of raising error
 
-                if 'datetime' not in row or pd.isnull(row['datetime']):
-                    raise ValueError("Missing or null 'time' field in the data row")
+        Returns:
+            Dict with statistics: {'inserted': int, 'skipped': int, 'errors': int}
+        """
+        
+        stats = {'inserted': 0, 'skipped': 0, 'errors': 0}
 
-                if not isinstance(row['datetime'], datetime):
-                    raise ValueError(f"'datetime' field must be a datetime object, got {type(row['datetime'])} instead")
+        if data is None or len(data) == 0:
+            logger.warning('No data provided to insert_data method.')
+            return stats
 
-                query = self._build_query(measurement, row['datetime'], row['datetime'], tags)
-                if self.db.contains(query) and not skip_existing:
-                    raise ValueError("Duplicate entry found in the database: Cannot append.")
-                elif self.db.contains(query):
-                    logger.info(f'Row with datetime {row['datetime']} and tags {tags} already exists. Skipping')
+        # Validate required columns
+        if 'datetime' not in data.columns:
+            raise ValueError("DataFrame must contain 'datetime' column")
+
+        # Ensure datetime column is timezone-aware
+        data = self._ensure_timezone_aware(data.copy())
+
+        # Determine fields to include
+        field_columns = self._get_field_columns(data, fields)
+
+        for idx, row in data.iterrows():
+            try:
+                if pd.isnull(row['datetime']):
+                    logger.warning(f"Skipping row {idx}: missing datetime")
+                    stats['errors'] += 1
                     continue
+                ts = row['datetime']
 
-                if fields is None:
-                    fields = {col: row[col] for col in row.index if col not in ['datetime']}
-                else:
-                    fields = {col: row[col] for col in fields}
+                # Check for duplicates
+                exists = False
+                try:
+                    exists = self._point_exists(measurement, ts, tags)
+                except Exception as e:
+                    logger.error(f"Error checking existing point for row {idx}, datetime {ts}: {e}")
+                    stats['errors'] += 1
+                    if skip_existing:
+                        # If we can't verify existence, skip to avoid accidental duplicates
+                        logger.warning(f"Skipping row {idx} due to existence check failure")
+                        continue
+                    else:
+                        raise
 
-                for key, value in fields.copy().items():
-                    if value is not None and not isinstance(value, Number):
-                        logger.warning(f"Field '{key}' must be a numeric value or None, got {type(value)} instead. Will not be added to database")
-                        fields.pop(key)
+                if skip_existing and exists:
+                    logger.debug(f'Row with datetime {ts} already exists. Skipping')
+                    stats['skipped'] += 1
+                    continue
+                elif not skip_existing and exists:
+                    raise ValueError(f"Duplicate entry found for datetime {ts}")
+
+                # Prepare fields
+                point_fields = self._prepare_fields(row, field_columns)
+
+                if not point_fields:  # Skip if no valid fields
+                    logger.warning(f"Skipping row {idx}: no valid numeric fields")
+                    stats['errors'] += 1
+                    continue
 
                 point = Point(
                     time=row['datetime'],
                     measurement=measurement,
-                    tags=tags,
-                    fields=fields
+                    tags=tags.copy(),
+                    fields=point_fields
                 )
                 self.db.insert(point)
+                stats['inserted'] += 1
+
+            except Exception as e:
+                logger.error(f"Error processing row {idx}: {e}")
+                stats['errors'] += 1
+                continue
+
+        logger.info(f"Insert completed: {stats}")
+        return stats
+
+    def _ensure_timezone_aware(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Ensure datetime column is timezone-aware."""
+        if data['datetime'].dt.tz is None:
+            tz = pytz.timezone(TIMEZONE)
+            data['datetime'] = data['datetime'].dt.tz_localize(tz)
+            logger.debug("Localized naive datetimes to timezone")
+        return data
+
+    def _get_field_columns(self, data: pd.DataFrame, fields: Optional[List[str]], exclude_fields = ['datetime', 'station_id']) -> List[str]:
+        """Get list of field columns to include."""
+        if fields is None:
+            return [col for col in data.columns if col not in exclude_fields]
         else:
-            logger.warning('No data provided to insert_data method.')
+            # Validate that specified fields exist
+            missing_fields = set(fields) - set(data.columns)
+            if missing_fields:
+                raise ValueError(f"Specified fields not found in data: {missing_fields}")
+            return fields
 
-    def _build_query(self, measurement: str, start_time: datetime, end_time: datetime, tags: dict = None):
-        measurement_query = MeasurementQuery()
-        measurement_query = measurement_query == measurement
+    def _prepare_fields(self, row: pd.Series, field_columns: List[str]) -> Dict[str, Any]:
+        """Prepare and validate field values for a single row."""
+        prepared_fields = {}
 
-        if start_time.tzinfo is None or end_time.tzinfo is None:
-            raise ValueError("start_time and end_time must have timezone information.")
+        for col in field_columns:
+            value = row[col]
 
-        time_query = TimeQuery()
-        time_query = (time_query >= start_time) & (time_query <= end_time)
+            # Validate numeric values
+            if not isinstance(value, Number) and value is not None:
+                logger.warning(f"Field '{col}' must be numeric or None, got {type(value)}. Skipping.")
+                continue
 
-        tag_query = TagQuery()
+            prepared_fields[col] = value
+
+        return prepared_fields
+
+    def _point_exists(self, measurement: str, timestamp: datetime, tags: Dict[str, Any]) -> bool:
+        """Check if a point already exists for the given measurement, time, and tags."""
+        query = self._build_query(measurement, timestamp, timestamp, tags)
+        return self.db.contains(query)
+
+    def _build_query(self, measurement: str, start_time: datetime, end_time: datetime, tags: Optional[Dict[str, Any]] = None):
+        """Build a TinyFlux query with improved error handling."""
+        # Validate timezone awareness
+        for time_val, name in [(start_time, 'start_time'), (end_time, 'end_time')]:
+            if time_val.tzinfo is None:
+                raise ValueError(f"{name} must have timezone information.")
+
+        # Build measurement query
+        measurement_query = MeasurementQuery() == measurement
+
+        # Build time query
+        time_query = (TimeQuery() >= start_time) & (TimeQuery() <= end_time)
+
+        # Build tag query
         if tags:
-            for i, (key, value) in enumerate(tags.items()):
-                if i == 0:
-                    tag_query_combined = (tag_query[key] == value)
-                else:
-                    tag_query_combined &= (tag_query[key] == value)
+            tag_query = TagQuery()
+            tag_conditions = [tag_query[key] == value for key, value in tags.items()]
 
-            return measurement_query & time_query & tag_query_combined
+            # Combine tag conditions
+            combined_tag_query = tag_conditions[0]
+            for condition in tag_conditions[1:]:
+                combined_tag_query &= condition
 
+            return measurement_query & time_query & combined_tag_query
         else:
             return measurement_query & time_query
 
-    def query_data(self, measurement: str, start_time: datetime, end_time: datetime, tags: dict = None) -> pd.DataFrame:
-        query = self._build_query(measurement, start_time, end_time, tags)
-        results = self.db.search(query)
-        
-        index, values = [], []
-        for result in results:
-            index.append(result.time)
+    def query_data(self,
+                  measurement: str,
+                  start_time: datetime,
+                  end_time: datetime,
+                  tags: Optional[Dict[str, Any]] = None,
+                  fields: Optional[List[str]] = None) -> pd.DataFrame:
+        """
+        Query data with improved error handling and optional field filtering.
 
-            result_fields = result.fields
-            result_fields['station_id'] = result.tags['station_id']
-            values.append(result_fields)
+        Args:
+            measurement: Measurement name to query
+            start_time: Start time (timezone-aware)
+            end_time: End time (timezone-aware)
+            tags: Optional tags to filter by
+            fields: Optional list of fields to include in result
 
-        return pd.DataFrame(data = values, index = index)
+        Returns:
+            DataFrame with datetime index and requested fields
+        """
+        try:
+            query = self._build_query(measurement, start_time, end_time, tags)
+            results = self.db.search(query)
+
+            if not results:
+                logger.info(f"No data found for query: measurement={measurement}, "
+                          f"time_range={start_time} to {end_time}, tags={tags}")
+                return pd.DataFrame()
+
+            # Process results
+            data_rows = []
+            timestamps = []
+
+            for result in results:
+                timestamps.append(result.time)
+
+                # Combine fields and tags
+                row_data = result.fields.copy()
+
+                # Safely add tags to row data
+                for tag_key, tag_value in result.tags.items():
+                    row_data[tag_key] = tag_value
+
+                # Filter fields if specified
+                if fields:
+                    row_data = {k: v for k, v in row_data.items() if k in fields or k in result.tags}
+
+                data_rows.append(row_data)
+
+            # Create DataFrame
+            df = pd.DataFrame(data=data_rows, index=pd.DatetimeIndex(timestamps, name='datetime'))
+
+            # Sort by datetime
+            df = df.sort_index()
+
+            logger.debug(f"Query returned {len(df)} rows")
+            return df
+
+        except Exception as e:
+            logger.error(f"Query failed: {e}")
+            raise
 
 if __name__ == '__main__':
 
@@ -111,7 +255,13 @@ if __name__ == '__main__':
             drop_columns = True
         )
 
-    db.insert_data(data, measurement="SBR", tags={"station_id": "103", "type": "meteo", "source": "SBR"}, skip_existing = True)
+    insert_stats = db.insert_data(
+        data, 
+        measurement="SBR", 
+        tags={"station_id": "103", "type": "meteo", "source": "SBR"}, 
+        skip_existing = True
+        )
+    print(insert_stats)
 
     tz = pytz.timezone(TIMEZONE)
     start = datetime(2025, 9, 1, 0, 0, tzinfo = tz)
@@ -119,3 +269,4 @@ if __name__ == '__main__':
     query_result = db.query_data(measurement="SBR", start_time=start, end_time=end, tags = {'station_id': '103'})
 
     print(query_result.dtypes)
+    print(query_result.head())
