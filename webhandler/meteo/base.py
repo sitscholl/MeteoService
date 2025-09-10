@@ -3,7 +3,6 @@ import pandas as pd
 import pandera.pandas as pa
 from typing import Any, Dict, Optional
 
-
 class BaseMeteoHandler(ABC):
     """
     Abstract base class for meteorological data handlers.
@@ -56,33 +55,23 @@ class BaseMeteoHandler(ABC):
         Returns:
             pa.DataFrameSchema: Schema for validating SBR output data
         """
-        #['Datum', 'create_time', 'T2m', 'TB -25cm', 'Nied.', 'Wind', 'Wg  max', 'RL', 'Ber.', 'Tt', 'Tf', 'mg22', 'mg23', 'station_id', 'Ausf.']
         return pa.DataFrameSchema(
             {
-                "Datum": pa.Column(pd.Timestamp),
+                "datetime": pa.Column(pd.DatetimeTZDtype(tz="Europe/Rome")),
                 "station_id": pa.Column(str),
 
-                # SBR-specific columns based on sbr_colmap
-                "T2m": pa.Column(float, nullable=True),          # Temperature 2m
-                "TB -25cm": pa.Column(float, nullable=True, required=False),     # Soil temperature -25cm
-                "Tt": pa.Column(float, nullable=True, required=False),           # Dry temperature 60cm
-                "Tf": pa.Column(float, nullable=True, required=False),           # Wet temperature
-                "RL": pa.Column(float, nullable=True, required=False),           # Relative humidity
-                "Wind": pa.Column(float, nullable=True, required=False),         # Wind speed
-                "Wg  max": pa.Column(float, nullable=True, required=False),      # Max wind gust
-                "Nied.": pa.Column(float, nullable=True),        # Precipitation
-                "Ber.": pa.Column(bool, nullable=True, required=False),         # Irrigation
-                "Bn": pa.Column(float, nullable=True, required=False),           # Leaf wetness
-                "Nied. sum": pa.Column(float, nullable=True, required=False),    # Precipitation sum
-                "T2m avg": pa.Column(float, nullable=True, required=False),      # Average temperature 2m
-                "BMp": pa.Column(float, nullable=True, required=False),          # Soil moisture
-                "LMp": pa.Column(float, nullable=True, required=False),          # Air moisture
-                "MMp": pa.Column(float, nullable=True, required=False),          # Medium moisture
-                "SMp": pa.Column(float, nullable=True, required=False),          # Surface moisture
-                
-                # Additional columns that might be present
-                "create_time": pa.Column(pd.Timestamp, nullable=True, required=False),
-                "rainStart": pa.Column(pd.Timestamp, nullable=True, required=False),
+                "tair_2m": pa.Column(float, nullable=True),                           # Temperature 2m
+                "tsoil_25cm": pa.Column(float, nullable=True, required=False),     # Soil temperature -25cm
+                "tdry_60cm": pa.Column(float, nullable=True, required=False),           # Dry temperature 60cm
+                "twet_60cm": pa.Column(float, nullable=True, required=False),           # Wet temperature
+                "relative_humidity": pa.Column(float, nullable=True, required=False),           # Relative humidity
+                "wind_speed": pa.Column(float, nullable=True, required=False),         # Wind speed
+                "wind_gust": pa.Column(float, nullable=True, required=False),      # Max wind gust
+                "precipitation": pa.Column(float, nullable=True),                        # Precipitation
+                "irrigation": pa.Column(int, nullable=True, required=False),         # Irrigation
+                "leaf_wetness": pa.Column(float, nullable=True, required=False),           # Leaf wetness
+                "millsperiode_start": pa.Column(float, nullable=True, required=False),          # Beginn Millsperiode
+                "rain_start": pa.Column(pd.Timestamp, nullable=True, required=False),
             },
             index=pa.Index(int),
             strict=False  # Allow additional columns that might be added
@@ -113,7 +102,7 @@ class BaseMeteoHandler(ABC):
         """
         pass
 
-    def run(self, **kwargs) -> pd.DataFrame:
+    def run(self, drop_columns = False, **kwargs) -> pd.DataFrame:
         """
         Run the complete data processing pipeline.
         
@@ -132,6 +121,9 @@ class BaseMeteoHandler(ABC):
         raw_data = self.get_data(**kwargs)
         transformed_data = self.transform(raw_data)
         validated_data = self.validate(transformed_data)
+
+        if drop_columns:
+            validated_data = validated_data[[i for i in validated_data.columns if i in self.output_schema.columns]]
         
         # Save if output_path is provided
         if 'output_path' in kwargs:
