@@ -1,3 +1,4 @@
+from types import NoneType
 from tinyflux import TinyFlux, Point, MeasurementQuery, TagQuery, FieldQuery, TimeQuery
 import pandas as pd
 
@@ -14,7 +15,29 @@ logger = logging.getLogger(__name__)
 class MeteoDB:
 
     def __init__(self, path: str):
-        self.db = TinyFlux(path)
+        self.db_path = path
+        self.db = None
+
+    def __enter__(self):
+        try:
+            self._connect()
+        except Exception as e:
+            raise ValueError(f"Cannot connect to the database at {self.db_path}: {e}")
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            self._disconnect()
+        except Exception as e:
+            logger.error(f"Error during disconnection from database at {self.db_path}: {e}")
+
+    def _connect(self):
+        self.db = TinyFlux(self.db_path)
+
+    def _disconnect(self):
+        if self.db is not None:
+            self.db.close()
+            self.db = None
 
     def insert_data(self,
                    data: pd.DataFrame,
@@ -35,6 +58,9 @@ class MeteoDB:
         Returns:
             Dict with statistics: {'inserted': int, 'skipped': int, 'errors': int}
         """
+
+        if self.db is None:
+            raise ValueError("Database connection is not established")
         
         stats = {'inserted': 0, 'skipped': 0, 'errors': 0}
 
@@ -192,6 +218,9 @@ class MeteoDB:
         Returns:
             DataFrame with datetime index and requested fields
         """
+        if self.db is None:
+            raise ValueError("Database connection is not established")
+
         try:
             query = self._build_query(measurement, start_time, end_time, tags)
             results = self.db.search(query)
@@ -236,6 +265,9 @@ class MeteoDB:
 
     def get_measurements(self) -> List[str]:
         """Get list of all measurements in the database."""
+        if self.db is None:
+            raise ValueError("Database connection is not established")
+
         try:
             all_points = self.db.all()
             measurements = list(set(point.measurement for point in all_points))
@@ -246,6 +278,9 @@ class MeteoDB:
 
     def get_tags_for_measurement(self, measurement: str) -> Dict[str, List[Any]]:
         """Get all unique tag values for a measurement (cached)."""
+        if self.db is None:
+            raise ValueError("Database connection is not established")
+
         try:
             query = MeasurementQuery() == measurement
             points = self.db.search(query)
@@ -268,8 +303,6 @@ if __name__ == '__main__':
     from webhandler.meteo.SBR import SBR
     import argparse
 
-    db = MeteoDB('db/db.csv')
-
     parser = argparse.ArgumentParser()
     parser.add_argument('username', help = 'username')
     parser.add_argument('password', help = 'password')
@@ -284,18 +317,21 @@ if __name__ == '__main__':
             drop_columns = True
         )
 
-    insert_stats = db.insert_data(
-        data, 
-        measurement="SBR", 
-        tags={"station_id": "103", "type": "meteo", "source": "SBR"}, 
-        skip_existing = True
-        )
-    print(insert_stats)
+    with MeteoDB('db/db.csv') as db:
 
-    tz = pytz.timezone(TIMEZONE)
-    start = datetime(2025, 9, 1, 0, 0, tzinfo = tz)
-    end = datetime(2025, 9, 9, 14, 0, tzinfo=tz)
-    query_result = db.query_data(measurement="SBR", start_time=start, end_time=end, tags = {'station_id': '103'})
+        insert_stats = db.insert_data(
+            data, 
+            measurement="SBR", 
+            tags={"station_id": "103", "type": "meteo", "source": "SBR"}, 
+            skip_existing = True
+            )
+            
+        print(insert_stats)
 
-    print(query_result.dtypes)
-    print(query_result.head())
+        tz = pytz.timezone(TIMEZONE)
+        start = datetime(2025, 9, 1, 0, 0, tzinfo = tz)
+        end = datetime(2025, 9, 9, 14, 0, tzinfo=tz)
+        query_result = db.query_data(measurement="SBR", start_time=start, end_time=end, tags = {'station_id': '103'})
+
+        print(query_result.dtypes)
+        print(query_result.head())
