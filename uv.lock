@@ -289,6 +289,15 @@ wheels = [
 ]
 
 [[package]]
+name = "tinyflux"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/9f/e47b2b293ce41b29ddc78f712b84d30bd463fe3427cb6eb0e39b6fd478be/tinyflux-1.0.0.tar.gz", hash = "sha256:a7aea4648d50cdcee4bb7904c37b2eedf27df39a3eb68f1ff22b77e9c30f1447", size = 56029 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/80/c1/3a266c9dd902116d3cd46391dbe8d14f62bb0e3ec9b5c6f788b8b0e847bd/tinyflux-1.0.0-py3-none-any.whl", hash = "sha256:0d191d5a11bb86f01d3b015ccc3130713abaa21cbc8f85d79066cd34a3650490", size = 35949 },
+]
+
+[[package]]
 name = "trio"
 version = "0.30.0"
 source = { registry = "https://pypi.org/simple" }
@@ -374,6 +383,7 @@ dependencies = [
     { name = "pytz" },
     { name = "requests" },
     { name = "selenium" },
+    { name = "tinyflux" },
     { name = "webdriver-manager" },
 ]
 
@@ -383,6 +393,7 @@ requires-dist = [
     { name = "pytz", specifier = ">=2025.2" },
     { name = "requests", specifier = ">=2.32.3" },
     { name = "selenium", specifier = ">=4.31.0" },
+    { name = "tinyflux", specifier = ">=1.0.0" },
     { name = "webdriver-manager", specifier = ">=4.0.2" },
 ]
 
