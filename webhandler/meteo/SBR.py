@@ -13,6 +13,24 @@ from .base import BaseMeteoHandler
 
 logger = logging.getLogger(__name__)
 
+# ['datetime', 'create_time', 'tair_2m', 'tsoil_25cm', 'precipitation',
+#        'wind_speed', 'wind_gust', 'relative_humidity', 'irrigation',
+#        'tdry_60cm', 'twet_60cm', 'mg22', 'mg23', 'station_id', 'Ausf.']
+SBR_RENAME = {
+        "Datum": "datetime",
+        "T2m": "tair_2m",
+        "TB -25cm": "tsoil_25cm",
+        "Tt": "tdry_60cm",
+        "Tf": "twet_60cm",
+        "RL": "relative_humidity",
+        "Wind": "wind_speed",
+        "Wg  max": "wind_gust",
+        "Nied.": "precipitation",
+        "Ber.": "irrigation",
+        "Bn": "leaf_wetness",
+        "BMp": "millsperiode_start",
+        "rainStart": "rain_start"
+}
 
 class SBR(BaseMeteoHandler):
     """
@@ -170,7 +188,7 @@ class SBR(BaseMeteoHandler):
         if not dataframes:
             return pd.DataFrame()
             
-        return pd.concat(dataframes, ignore_index=True)
+        return pd.concat(dataframes, ignore_index=True).rename(columns = SBR_RENAME)
 
     def _extract_data_from_response(
         self,
@@ -226,7 +244,7 @@ class SBR(BaseMeteoHandler):
                 if unit in ['mm', 'degC', '%', 'm*s-1']:
                     tbl_re[col] = pd.to_numeric(tbl_re[col], errors='coerce')
                 elif unit == 'Ein/Aus':
-                    tbl_re[col] = tbl_re[col].astype(bool)
+                    tbl_re[col] = tbl_re[col].astype(bool).astype(int)
                 else:
                     tbl_re[col] = tbl_re[col].astype(str)
             except (ValueError, TypeError) as e:
@@ -281,6 +299,7 @@ class SBR(BaseMeteoHandler):
                 tbl['Datum'] = tbl['Datum'].apply(
                     lambda x: datetime.datetime.fromtimestamp(int(x)) if pd.notna(x) else pd.NaT
                 )
+                tbl['Datum'] = tbl['Datum'].dt.tz_localize(tz='Europe/Rome')
         except (ValueError, TypeError) as e:
             logger.warning(f"Error converting Datum: {e}")
 
