@@ -9,9 +9,11 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 import pytz
+import logging
+import pandas as pd
+
 from webhandler.db import MeteoDB
 from webhandler.config import TIMEZONE
-import logging
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -109,13 +111,13 @@ async def get_measurement_tags(
 #     try:
 #         tags = {"station_id": station_id} if station_id else None
 #         time_range = db.get_time_range(measurement, tags)
-        
+
 #         if not time_range:
 #             raise HTTPException(
-#                 status_code=404, 
+#                 status_code=404,
 #                 detail=f"No data found for measurement '{measurement}'"
 #             )
-        
+
 #         return {
 #             "measurement": measurement,
 #             "start_time": time_range[0],
@@ -142,14 +144,14 @@ async def query_timeseries(
         if query.end_time.tzinfo is None:
             tz = pytz.timezone(TIMEZONE)
             query.end_time = query.end_time.replace(tzinfo=tz)
-        
+
         # Validate time range
         if query.start_time >= query.end_time:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail="start_time must be before end_time"
             )
-        
+
         # Query database
         df = db.query_data(
             measurement=query.measurement,
@@ -158,7 +160,7 @@ async def query_timeseries(
             tags=query.tags,
             fields=query.fields
         )
-        
+
         if df.empty:
             return TimeseriesResponse(
                 data=[],
@@ -173,14 +175,14 @@ async def query_timeseries(
                     "fields": query.fields
                 }
             )
-        
+
         # Convert DataFrame to list of dictionaries
         data = []
         for timestamp, row in df.iterrows():
             record = {"datetime": timestamp}
             record.update(row.to_dict())
             data.append(record)
-        
+
         return TimeseriesResponse(
             data=data,
             count=len(data),
@@ -192,10 +194,10 @@ async def query_timeseries(
                 "measurement": query.measurement,
                 "tags": query.tags,
                 "fields": list(df.columns),
-                "data_types": df.dtypes.to_dict()
+                "data_types": {col: str(dtype) for col, dtype in df.dtypes.items()}
             }
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -207,11 +209,11 @@ async def get_database_stats(db: MeteoDB = Depends(get_db)):
     """Get overall database statistics."""
     try:
         measurements = db.get_measurements()
-        
+
         # Get time ranges for each measurement
         time_ranges = {}
         total_points = 0
-        
+
         for measurement in measurements:
             time_range = db.get_time_range(measurement)
             if time_range:
@@ -219,7 +221,7 @@ async def get_database_stats(db: MeteoDB = Depends(get_db)):
                     "start": time_range[0],
                     "end": time_range[1]
                 }
-                
+
                 # Rough estimate of points (this could be expensive for large datasets)
                 # In production, you might want to cache this or compute it differently
                 try:
@@ -227,13 +229,13 @@ async def get_database_stats(db: MeteoDB = Depends(get_db)):
                     total_points += len(df)
                 except:
                     pass  # Skip if query fails
-        
+
         return DatabaseStats(
             measurements=measurements,
             total_points=total_points,
             time_ranges=time_ranges
         )
-        
+
     except Exception as e:
         logger.error(f"Failed to get database stats: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve database statistics")
@@ -245,7 +247,3 @@ async def value_error_handler(request, exc):
         status_code=400,
         content={"detail": str(exc)}
     )
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
