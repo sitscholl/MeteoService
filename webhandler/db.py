@@ -7,9 +7,9 @@ import logging
 import pytz
 from typing import Optional, Dict, List, Any
 
-logger = logging.getLogger(__name__)
+from webhandler.config import TIMEZONE
 
-TIMEZONE = 'Europe/Rome'
+logger = logging.getLogger(__name__)
 
 class MeteoDB:
 
@@ -233,6 +233,35 @@ class MeteoDB:
         except Exception as e:
             logger.error(f"Query failed: {e}")
             raise
+
+    def get_measurements(self) -> List[str]:
+        """Get list of all measurements in the database."""
+        try:
+            all_points = self.db.all()
+            measurements = list(set(point.measurement for point in all_points))
+            return sorted(measurements)
+        except Exception as e:
+            logger.error(f"Failed to get measurements: {e}")
+            return []
+
+    def get_tags_for_measurement(self, measurement: str) -> Dict[str, List[Any]]:
+        """Get all unique tag values for a measurement (cached)."""
+        try:
+            query = MeasurementQuery() == measurement
+            points = self.db.search(query)
+
+            tag_values = {}
+            for point in points:
+                for tag_key, tag_value in point.tags.items():
+                    if tag_key not in tag_values:
+                        tag_values[tag_key] = set()
+                    tag_values[tag_key].add(tag_value)
+            # Convert sets to sorted lists
+            return {k: sorted(list(v)) for k, v in tag_values.items()}
+
+        except Exception as e:
+            logger.error(f"Failed to get tags for measurement {measurement}: {e}")
+            return {}
 
 if __name__ == '__main__':
 

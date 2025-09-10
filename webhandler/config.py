@@ -1,3 +1,5 @@
+TIMEZONE = 'Europe/Rome'
+
 sbr_colmap = {
     "mg4": {
         "id": "4",
