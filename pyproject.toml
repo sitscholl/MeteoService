@@ -9,6 +9,7 @@ dependencies = [
     "pandas>=2.2.3",
     "pydantic>=2.11.7",
     "pytz>=2025.2",
+    "pyyaml>=6.0",
     "requests>=2.32.3",
     "selenium>=4.31.0",
     "tinyflux>=1.0.0",

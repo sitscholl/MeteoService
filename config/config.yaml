@@ -1,0 +1,51 @@
+# Configuration for meteorological data providers
+providers:
+  sbr:
+    enabled: true
+    class: webhandler.meteo.SBR.SBR
+    username: "Simon93!"
+    password: "Simon93!"
+    timezone: 'Europe/Rome' # verify this
+
+
+# Database configuration
+database:
+  path: "db/db.csv"
+  
+# General settings
+settings:
+  auto_fetch_missing_data: true
+  max_gap_days: 30  # Maximum gap in days to automatically fetch
+  chunk_size_days: 7  # Size of chunks when fetching data
+  timeseries_freq: '1H'
+
+logging:
+    version: 1
+    disable_existing_loggers: false
+    formatters: 
+        standard:
+            format: "%(asctime)s - %(levelname)s - %(filename)s (%(process)d): %(message)s"
+            datefmt: "%Y-%m-%d %H:%M:%S"
+        email:
+            format: "%(message)s"
+            datefmt: "%Y-%m-%d %H:%M:%S"
+    handlers:
+        console:
+          class: logging.StreamHandler
+          formatter: standard
+          level: DEBUG
+          stream: ext://sys.stdout
+        file:
+          class: logging.handlers.TimedRotatingFileHandler
+          level: INFO
+          formatter: standard
+          filename: config/logs/meteoservice.log
+          when: midnight
+          interval: 1
+          backupCount: 30  # Keep 30 days of logs
+          utc: false
+          encoding: utf8
+    loggers:
+        root:
+            handlers: [console, file]
+            level: DEBUG

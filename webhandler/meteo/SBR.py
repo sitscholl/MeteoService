@@ -5,7 +5,7 @@ import pandas as pd
 import re
 import time
 from typing import Any, Dict, List
-import pandera as pa
+import pytz
 
 from webhandler.config import sbr_colmap
 from webhandler.utils import split_dates
@@ -42,9 +42,10 @@ class SBR(BaseMeteoHandler):
     stationdata_url = base_url + "/wetterstationen-custom"
     user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 
-    def __init__(self, username: str, password: str):
+    def __init__(self, username: str, password: str, timezone: str, **kwargs):
         self.username = username
         self.password = password
+        self.timezone = timezone
         self._session = None
 
     def __enter__(self):
@@ -102,7 +103,15 @@ class SBR(BaseMeteoHandler):
             self._session.close()
             self._session = None
 
-    def get_data(self, **kwargs) -> List[str]:
+    def get_data(
+            self, 
+            station_id: str | int, 
+            start: datetime.datetime, 
+            end: datetime.datetime, 
+            data_type: str, 
+            sleep_time: int = 1,
+            request_batch_size = 7
+        ) -> List[str]:
         """
         Query the raw data from the SBR website.
         
@@ -117,16 +126,13 @@ class SBR(BaseMeteoHandler):
         Returns:
             List[str]: List of raw HTML response texts from the website
         """
-        # Extract parameters with defaults
-        station_id = kwargs.get('station_id')
-        start = kwargs.get('start')
-        end = kwargs.get('end')
-        data_type = kwargs.get('type', 'meteo')
-        sleep_time = kwargs.get('sleep', 1)
         
         # Validate required parameters
         if not all([station_id, start, end]):
             raise ValueError("station_id, start, and end are required parameters")
+
+        start = start.astimezone(pytz.timezone(self.timezone))
+        end = end.astimezone(pytz.timezone(self.timezone))
         
         if isinstance(station_id, str):
             station_id = int(station_id)
@@ -140,7 +146,7 @@ class SBR(BaseMeteoHandler):
             "Accept-Language": "en-US,en;q=0.9"
         }
 
-        dates_split = split_dates(start, end, n_days=7)
+        dates_split = split_dates(start, end, n_days=request_batch_size)
         raw_responses = []
         
         for start_date, end_date in dates_split:
@@ -299,7 +305,7 @@ class SBR(BaseMeteoHandler):
                 tbl['Datum'] = tbl['Datum'].apply(
                     lambda x: datetime.datetime.fromtimestamp(int(x)) if pd.notna(x) else pd.NaT
                 )
-                tbl['Datum'] = tbl['Datum'].dt.tz_localize(tz='Europe/Rome')
+                tbl['Datum'] = tbl['Datum'].dt.tz_localize(tz=self.timezone).dt.tz_convert('UTC')
         except (ValueError, TypeError) as e:
             logger.warning(f"Error converting Datum: {e}")
 

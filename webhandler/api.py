@@ -41,7 +41,7 @@ def get_query_manager() -> QueryManager:
 
 # Pydantic models for request/response
 class TimeseriesQuery(BaseModel):
-    measurement: str = Field(..., description="Measurement name (e.g., 'SBR')")
+    provider: str = Field(..., description="provider name (e.g., 'SBR')")
     start_time: datetime = Field(..., description="Start time (ISO format)")
     end_time: datetime = Field(..., description="End time (ISO format)")
     tags: Optional[Dict[str, str]] = Field(None, description="Filter tags")
@@ -54,7 +54,7 @@ class TimeseriesResponse(BaseModel):
     metadata: Dict[str, Any]
 
 class DatabaseStats(BaseModel):
-    measurements: List[str]
+    providers: List[str]
     total_points: int
     time_ranges: Dict[str, Dict[str, datetime]]
 
@@ -73,61 +73,61 @@ async def root():
 async def health_check(db: MeteoDB = Depends(get_db)):
     """Health check endpoint."""
     try:
-        measurements = db.get_measurements()
+        providers = db.get_providers()
         return {
             "status": "healthy",
-            "measurements_count": len(measurements),
+            "providers_count": len(providers),
             "timestamp": datetime.now(pytz.timezone(TIMEZONE))
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         raise HTTPException(status_code=503, detail="Database unavailable")
 
-@app.get("/measurements", response_model=List[str])
-async def get_measurements(db: MeteoDB = Depends(get_db)):
-    """Get list of available measurements."""
+@app.get("/providers", response_model=List[str])
+async def get_providers(db: MeteoDB = Depends(get_db)):
+    """Get list of available providers."""
     try:
-        return db.get_measurements()
+        return db.get_providers()
     except Exception as e:
-        logger.error(f"Failed to get measurements: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve measurements")
+        logger.error(f"Failed to get providers: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve providers")
 
-@app.get("/measurements/{measurement}/tags")
-async def get_measurement_tags(
-    measurement: str,
+@app.get("/providers/{provider}/tags")
+async def get_provider_tags(
+    provider: str,
     db: MeteoDB = Depends(get_db)
 ):
-    """Get available tags for a specific measurement."""
+    """Get available tags for a specific provider."""
     try:
-        tags = db.get_tags_for_measurement(measurement)
+        tags = db.get_tags_for_provider(provider)
         if not tags:
-            raise HTTPException(status_code=404, detail=f"Measurement '{measurement}' not found")
+            raise HTTPException(status_code=404, detail=f"provider '{provider}' not found")
         return tags
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get tags for {measurement}: {e}")
+        logger.error(f"Failed to get tags for {provider}: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve tags")
 
-# @app.get("/measurements/{measurement}/time-range")
-# async def get_measurement_time_range(
-#     measurement: str,
+# @app.get("/providers/{provider}/time-range")
+# async def get_provider_time_range(
+#     provider: str,
 #     station_id: Optional[str] = Query(None, description="Filter by station ID"),
 #     db: MeteoDB = Depends(get_db)
 # ):
-#     """Get time range for a measurement, optionally filtered by station."""
+#     """Get time range for a provider, optionally filtered by station."""
 #     try:
 #         tags = {"station_id": station_id} if station_id else None
-#         time_range = db.get_time_range(measurement, tags)
+#         time_range = db.get_time_range(provider, tags)
 
 #         if not time_range:
 #             raise HTTPException(
 #                 status_code=404,
-#                 detail=f"No data found for measurement '{measurement}'"
+#                 detail=f"No data found for provider '{provider
 #             )
 
 #         return {
-#             "measurement": measurement,
+#             "provider": provider,
 #             "start_time": time_range[0],
 #             "end_time": time_range[1],
 #             "tags": tags
@@ -135,7 +135,7 @@ async def get_measurement_tags(
 #     except HTTPException:
 #         raise
 #     except Exception as e:
-#         logger.error(f"Failed to get time range for {measurement}: {e}")
+#         logger.error(f"Failed to get time range for {provider}: {e}")
 #         raise HTTPException(status_code=500, detail="Failed to retrieve time range")
 
 @app.post("/query", response_model=TimeseriesResponse)
@@ -164,7 +164,7 @@ async def query_timeseries(
         # Use QueryManager to get data (includes smart fetching)
         df = query_manager.get_data(
             db=db,
-            measurement=query.measurement,
+            provider=query.provider,
             start_time=query.start_time,
             end_time=query.end_time,
             tags=query.tags,
@@ -180,7 +180,7 @@ async def query_timeseries(
                     "end": query.end_time
                 },
                 metadata={
-                    "measurement": query.measurement,
+                    "provider": query.provider,
                     "tags": query.tags,
                     "fields": query.fields
                 }
@@ -201,7 +201,7 @@ async def query_timeseries(
                 "end": df.index.max()
             },
             metadata={
-                "measurement": query.measurement,
+                "provider": query.provider,
                 "tags": query.tags,
                 "fields": list(df.columns),
                 "data_types": {col: str(dtype) for col, dtype in df.dtypes.items()}
@@ -218,16 +218,16 @@ async def query_timeseries(
 async def get_database_stats(db: MeteoDB = Depends(get_db)):
     """Get overall database statistics."""
     try:
-        measurements = db.get_measurements()
+        providers = db.get_providers()
 
-        # Get time ranges for each measurement
+        # Get time ranges for each provider
         time_ranges = {}
         total_points = 0
 
-        for measurement in measurements:
-            time_range = db.get_time_range(measurement)
+        for provider in providers:
+            time_range = db.get_time_range(provider)
             if time_range:
-                time_ranges[measurement] = {
+                time_ranges[provider] = {
                     "start": time_range[0],
                     "end": time_range[1]
                 }
@@ -235,13 +235,13 @@ async def get_database_stats(db: MeteoDB = Depends(get_db)):
                 # Rough estimate of points (this could be expensive for large datasets)
                 # In production, you might want to cache this or compute it differently
                 try:
-                    df = db.query_data(measurement, time_range[0], time_range[1])
+                    df = db.query_data(provider, time_range[0], time_range[1])
                     total_points += len(df)
                 except:
                     pass  # Skip if query fails
 
         return DatabaseStats(
-            measurements=measurements,
+            providers=providers,
             total_points=total_points,
             time_ranges=time_ranges
         )

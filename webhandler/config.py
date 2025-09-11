@@ -1,12 +1,16 @@
 import yaml
+import logging
 
 from pathlib import Path
 
-def load_config(config_path: str) -> Dict:
+logger = logging.getLogger(__name__)
+
+def load_config(config_path: str):
     """Load configuration from YAML file."""
     try:
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
+            logger.info(f"Loaded config file from {config_path}")
     except FileNotFoundError:
         logger.error(f"Configuration file {config_path} not found")
         raise
@@ -15,9 +19,9 @@ def load_config(config_path: str) -> Dict:
         raise
 
     #Make sure log directory exists
-    for handlers in config.get('logging', {}).get('handlers', []):
-        if filename in handlers.keys():
-            Path(filename).parent.mkdir(parents=True, exist_ok=True)
+    for handler_name, handler in config.get('logging', {}).get('handlers', {}).items():
+        if "filename" in handler.keys():
+            Path(handler['filename']).parent.mkdir(parents=True, exist_ok=True)
 
     return config
 

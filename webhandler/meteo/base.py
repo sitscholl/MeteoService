@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
 import pandas as pd
 import pandera.pandas as pa
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
-from webandler.db import MeteoDB
+from webhandler.db import MeteoDB
 
 class BaseMeteoHandler(ABC):
     """
@@ -59,7 +59,7 @@ class BaseMeteoHandler(ABC):
         """
         return pa.DataFrameSchema(
             {
-                "datetime": pa.Column(pd.DatetimeTZDtype(tz="Europe/Rome")),
+                "datetime": pa.Column(pd.DatetimeTZDtype(tz="UTC")),
                 "station_id": pa.Column(str),
 
                 "tair_2m": pa.Column(float, nullable=True),                           # Temperature 2m
@@ -98,7 +98,7 @@ class BaseMeteoHandler(ABC):
         self, 
         validated_data: pd.DataFrame,
         output_path: Optional[str],
-        measurement: str,
+        provider: str,
         tags: Dict[str, Any] | None = None,
         fields: List[str] | None = None,
         skip_existing = True) -> Dict[str, int]:
@@ -113,7 +113,7 @@ class BaseMeteoHandler(ABC):
 
             insert_stats = db.insert_data(
                 validated_data, 
-                measurement=measurement, 
+                provider=provider, 
                 tags=tags, 
                 fields=fields,
                 skip_existing = skip_existing
