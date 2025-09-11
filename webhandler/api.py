@@ -10,26 +10,34 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 import pytz
 import logging
-import pandas as pd
 
+from webhandler.config import load_config
 from webhandler.db import MeteoDB
-from webhandler.config import TIMEZONE
+from webhandler.query_manager import QueryManager
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Load config file
+config = load_config("config/config.yaml")
+
 logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
     title="Meteorological Data API",
-    description="Fast access to cached meteorological timeseries data",
+    description="Fast access to cached meteorological timeseries data with smart data fetching",
     version="1.0.0"
 )
+
+# Initialize QueryManager
+query_manager = QueryManager(config)
 
 # Database dependency
 def get_db() -> MeteoDB:
     """Dependency to get database instance."""
-    return MeteoDB('db/db.csv')
+    return MeteoDB(config.get('database', {}).get('path', 'db/db.csv'))
+
+def get_query_manager() -> QueryManager:
+    """Dependency to get data manager instance."""
+    return query_manager
 
 # Pydantic models for request/response
 class TimeseriesQuery(BaseModel):
@@ -133,9 +141,10 @@ async def get_measurement_tags(
 @app.post("/query", response_model=TimeseriesResponse)
 async def query_timeseries(
     query: TimeseriesQuery,
-    db: MeteoDB = Depends(get_db)
+    db: MeteoDB = Depends(get_db),
+    query_manager: QueryManager = Depends(get_query_manager)
 ):
-    """Query timeseries data with flexible filtering."""
+    """Query timeseries data with flexible filtering and smart data fetching."""
     try:
         # Ensure timezone awareness
         if query.start_time.tzinfo is None:
@@ -152,8 +161,9 @@ async def query_timeseries(
                 detail="start_time must be before end_time"
             )
 
-        # Query database
-        df = db.query_data(
+        # Use QueryManager to get data (includes smart fetching)
+        df = query_manager.get_data(
+            db=db,
             measurement=query.measurement,
             start_time=query.start_time,
             end_time=query.end_time,
