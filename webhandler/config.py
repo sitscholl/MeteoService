@@ -1,4 +1,25 @@
-TIMEZONE = 'Europe/Rome'
+import yaml
+
+from pathlib import Path
+
+def load_config(config_path: str) -> Dict:
+    """Load configuration from YAML file."""
+    try:
+        with open(config_path, 'r') as file:
+            config = yaml.safe_load(file)
+    except FileNotFoundError:
+        logger.error(f"Configuration file {config_path} not found")
+        raise
+    except yaml.YAMLError as e:
+        logger.error(f"Error parsing configuration file: {e}")
+        raise
+
+    #Make sure log directory exists
+    for handlers in config.get('logging', {}).get('handlers', []):
+        if filename in handlers.keys():
+            Path(filename).parent.mkdir(parents=True, exist_ok=True)
+
+    return config
 
 sbr_colmap = {
     "mg4": {
