@@ -2,7 +2,7 @@ from tinyflux import TinyFlux, Point, MeasurementQuery, TagQuery, FieldQuery, Ti
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
 
-from datetime import datetime
+from datetime import datetime, timezone
 from numbers import Number
 import logging
 import pytz
@@ -78,7 +78,7 @@ class MeteoDB:
             raise ValueError("DataFrame must contain 'datetime' column")
 
         # Ensure datetime column is timezone-aware
-        data = self._ensure_timezone_aware(data.copy())
+        data = self._ensure_timezone_aware(data, datetime_col = 'datetime')
 
         # Determine fields to include
         field_columns = self._get_field_columns(data, fields)
@@ -120,8 +120,11 @@ class MeteoDB:
                     stats['errors'] += 1
                     continue
 
+                # Convert datetime to UTC before storing
+                utc_datetime = self._to_utc(row['datetime'])
+
                 point = Point(
-                    time=row['datetime'],
+                    time=utc_datetime,
                     measurement=provider,
                     tags=tags.copy(),
                     fields=point_fields
@@ -137,12 +140,38 @@ class MeteoDB:
         logger.info(f"Insert completed: {stats}")
         return stats
 
-    def _ensure_timezone_aware(self, data: pd.DataFrame) -> pd.DataFrame:
+    def _ensure_timezone_aware(self, data: pd.DataFrame | pd.Series | datetime, datetime_col: str = None) -> pd.DataFrame | pd.Series | datetime:
         """Ensure datetime column is timezone-aware."""
-        if data['datetime'].dt.tz is None:
-            data['datetime'] = data['datetime'].dt.tz_localize("UTC")
-            logger.warning("Localized naive datetimes to UTC timezone")
+        if isinstance(data, pd.DataFrame):
+            if datetime_col is None:
+                raise ValueError("datetime_col cannot be None if a dataframe is given as input")
+            if data[datetime_col].dt.tz is None:
+                raise ValueError(f"The '{datetime_col}' column must be timezone-aware.")
+        elif isinstance(data, pd.Series):
+            if data.dt.tz is None:
+                raise ValueError("The 'Series' object must be timezone-aware.")
+        elif isinstance(data, datetime):
+            if data.tzinfo is None:
+                raise ValueError("The 'datetime' object must be timezone-aware.")
+        else:
+            raise NotImplementedError(f"Timestamps must be passed either in a dataframe, series or as datetime object. Got {type(data)}")
         return data
+
+    def _to_utc(self, data: pd.DataFrame | pd.Series | datetime, datetime_col: str = None) -> pd.DataFrame | pd.Series | datetime:
+        """Convert datetime column or object to UTC."""
+        data = self._ensure_timezone_aware(data, datetime_col = datetime_col)
+        if isinstance(data, pd.DataFrame):
+            if datetime_col is None:
+                raise ValueError("datetime_col cannot be None if a dataframe is given as input")
+            data = data.copy()  # Avoid modifying original data
+            data[datetime_col] = data[datetime_col].dt.tz_convert('UTC')
+            return data
+        elif isinstance(data, pd.Series):
+            return data.dt.tz_convert('UTC')
+        elif isinstance(data, datetime):
+            return data.astimezone(timezone.utc)
+        else:
+            raise NotImplementedError(f"Timestamps must be passed either in a dataframe, series or as datetime object to transform to utc. Got {type(data)}")
 
     def _get_field_columns(self, data: pd.DataFrame, fields: Optional[List[str]], exclude_fields = ['datetime', 'station_id']) -> List[str]:
         """Get list of field columns to include."""
@@ -197,9 +226,8 @@ class MeteoDB:
     def _build_query(self, provider: str, start_time: datetime, end_time: datetime, tags: Optional[Dict[str, Any]] = None):
         """Build a TinyFlux query with improved error handling."""
         # Validate timezone awareness
-        for time_val, name in [(start_time, 'start_time'), (end_time, 'end_time')]:
-            if time_val.tzinfo is None:
-                raise ValueError(f"{name} must have timezone information.")
+        start_time = self._to_utc(start_time)
+        end_time = self._to_utc(end_time)
 
         # Build provider query
         measurement_query = MeasurementQuery() == provider
@@ -243,11 +271,15 @@ class MeteoDB:
         if self.db is None:
             raise ValueError("Database connection is not established")
 
+        start_time_utc = self._to_utc(start_time)
+        end_time_utc = self._to_utc(end_time)
+        orig_timezone = start_time.tzinfo
+
         if tags is not None:
             tags = self._check_tags(tags)
 
         try:
-            query = self._build_query(provider, start_time, end_time, tags)
+            query = self._build_query(provider, start_time_utc, end_time_utc, tags)
             results = self.db.search(query)
 
             if not results:
@@ -280,6 +312,9 @@ class MeteoDB:
 
             # Sort by datetime
             df = df.sort_index()
+
+            # Convert index from UTC back to original timezone
+            df.index = df.index.tz_convert(orig_timezone)
 
             logger.debug(f"Query returned {len(df)} rows")
             return df
@@ -335,16 +370,16 @@ if __name__ == '__main__':
 
     tz = pytz.timezone("Europe/Rome")
 
-    with SBR(args.username, args.password) as client:
+    with SBR(args.username, args.password, timezone = "Europe/Rome") as client:
         data = client.run(
             station_id="103",
             start=datetime(2025, 9, 1, 0, 0),
-            end=datetime(2025, 9, 2, 0, 0),
-            type = 'meteo',
+            end=datetime(2025, 9, 1, 0, 10),
+            data_type = 'meteo',
             drop_columns = True
         )
 
-    with MeteoDB('db/db.csv', timezone = tz) as db:
+    with MeteoDB('db/db.csv') as db:
 
         insert_stats = db.insert_data(
             data, 
@@ -356,8 +391,8 @@ if __name__ == '__main__':
         print(insert_stats)
 
         
-        start = datetime(2025, 9, 1, 0, 0, tzinfo = tz)
-        end = datetime(2025, 9, 9, 14, 0, tzinfo=tz)
+        start = datetime(2025, 8, 20, 0, 0, tzinfo = tz)
+        end = datetime(2025, 9, 9, 14, 0, tzinfo = tz)
         query_result = db.query_data(provider="SBR", start_time=start, end_time=end, tags = {'station_id': '103'})
 
         print(query_result.dtypes)
