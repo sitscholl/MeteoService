@@ -1,0 +1,9 @@
+{
+  "provider": "SBR",
+  "start_time": "2025-08-25T00:00:00Z",
+  "end_time": "2025-08-26T23:59:59Z",
+  "tags": {
+    "station_id": "103"
+  },
+  "fields": ["tair_2m", "precipitation", "relative_humidity"]
+}
