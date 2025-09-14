@@ -41,26 +41,35 @@ class QueryManager:
         logger.info(f"Initialized providers: {list(providers.keys())}")
         return providers
     
-    def _find_data_gaps(self, existing_data: pd.DataFrame, start_time: datetime, 
+    def _find_data_gaps(self, existing_data: pd.DataFrame, start_time: datetime,
                         end_time: datetime) -> List[Tuple[datetime, datetime]]:
         """Find gaps in the database data for the requested time range."""
-        try:            
+        try:
             if existing_data.empty:
                 # No data exists, entire range is a gap
                 return [(start_time, end_time)]
-            
+
             try:
                 freq = pd.infer_freq(existing_data.index)
                 if freq is None:
                     raise ValueError(f"Frequency cannot be determined for a series of len {len(existing_data)}")
+
+                # Ensure timezone consistency between input times and existing data
+                if existing_data.index.tz != start_time.tzinfo:
+                    # Convert existing data index to match input timezone
+                    existing_data_tz_converted = existing_data.copy()
+                    existing_data_tz_converted.index = existing_data_tz_converted.index.tz_convert(start_time.tzinfo)
+                else:
+                    existing_data_tz_converted = existing_data
+
                 complete_ts = pd.date_range(start=start_time, end=end_time, freq=freq)
-                missing_ts = [ts for ts in complete_ts if ts not in existing_data.index]
+                missing_ts = [ts for ts in complete_ts if ts not in existing_data_tz_converted.index]
                 gaps = derive_datetime_gaps(missing_ts, freq = freq)
                 return gaps
             except Exception as e:
                 logger.warning(f'Unable to determine timeseries gaps: {e}')
                 return [(start_time, end_time)]
-            
+
         except Exception as e:
             logger.error(f"Error finding data gaps: {e}")
             return [(start_time, end_time)]  # Return full range as gap on error
@@ -110,23 +119,29 @@ class QueryManager:
             return pd.concat(all_data, ignore_index=True)
         return pd.DataFrame()
     
-    def get_data(self, db: MeteoDB, provider: str, start_time: datetime, 
-                 end_time: datetime, tags: Dict, 
+    def get_data(self, db: MeteoDB, provider: str, start_time: datetime,
+                 end_time: datetime, tags: Dict,
                  fields: Optional[List[str]] = None) -> pd.DataFrame:
         """
         Get data from database and fetch missing data from providers if needed.
-        
+
         Args:
             db: Database instance
             provider: provider name (corresponds to provider name in config.yaml --> providers)
-            start_time: Start time for data query
-            end_time: End time for data query
+            start_time: Start time for data query (must be timezone-aware)
+            end_time: End time for data query (must be timezone-aware)
             tags: Optional tags for filtering
             fields: Optional list of fields to return
-            
+
         Returns:
             Complete dataset combining database and newly fetched data
         """
+
+        # Validate timezone awareness
+        if start_time.tzinfo is None:
+            raise ValueError("start_time must be timezone-aware")
+        if end_time.tzinfo is None:
+            raise ValueError("end_time must be timezone-aware")
 
         if not 'station_id' in tags.keys():
             raise ValueError("The 'station_id' key must be provided in the tags.")

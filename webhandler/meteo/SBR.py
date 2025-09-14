@@ -105,29 +105,35 @@ class SBR(BaseMeteoHandler):
             self._session = None
 
     def get_data(
-            self, 
-            station_id: str | int, 
-            start: datetime.datetime, 
-            end: datetime.datetime, 
-            data_type: str, 
+            self,
+            station_id: str | int,
+            start: datetime.datetime,
+            end: datetime.datetime,
+            data_type: str,
             sleep_time: int = 1,
             request_batch_size = 7
         ) -> List[str]:
         """
         Query the raw data from the SBR website.
-        
+
         Args:
             **kwargs: Parameters for data retrieval including:
                 - station_id (int): The ID of the weather station
-                - start (datetime.datetime): The start date and time
-                - end (datetime.datetime): The end date and time
+                - start (datetime.datetime): The start date and time (must be timezone-aware)
+                - end (datetime.datetime): The end date and time (must be timezone-aware)
                 - type (str): The type of data to retrieve (default: 'meteo')
                 - sleep (int): The time to sleep between requests (default: 1)
-                
+
         Returns:
             List[str]: List of raw HTML response texts from the website
         """
-        
+
+        # Validate timezone awareness
+        if start.tzinfo is None:
+            raise ValueError("start datetime must be timezone-aware")
+        if end.tzinfo is None:
+            raise ValueError("end datetime must be timezone-aware")
+
         start = start.astimezone(pytz.timezone(self.timezone))
         end = end.astimezone(pytz.timezone(self.timezone))
         
@@ -279,8 +285,10 @@ class SBR(BaseMeteoHandler):
         try:
             if 'create_time' in tbl.columns:
                 tbl['create_time'] = tbl['create_time'].apply(
-                    lambda x: datetime.datetime.fromtimestamp(int(x)) if pd.notna(x) else pd.NaT
+                    lambda x: datetime.datetime.fromtimestamp(int(x), tz=pytz.timezone(self.timezone)) if pd.notna(x) else pd.NaT
                 )
+                # Convert to UTC for consistency
+                tbl['create_time'] = tbl['create_time'].dt.tz_convert('UTC')
         except (ValueError, TypeError) as e:
             logger.warning(f"Error converting create_time: {e}")
 

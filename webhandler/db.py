@@ -314,7 +314,14 @@ class MeteoDB:
             df = df.sort_index()
 
             # Convert index from UTC back to original timezone
-            df.index = df.index.tz_convert(orig_timezone)
+            # Handle potential timezone conversion issues
+            try:
+                df.index = df.index.tz_convert(orig_timezone)
+            except Exception as e:
+                logger.warning(f"Could not convert timezone back to {orig_timezone}: {e}. Keeping UTC timezone.")
+                # Ensure index is UTC-aware if conversion fails
+                if df.index.tz is None:
+                    df.index = df.index.tz_localize('UTC')
 
             logger.debug(f"Query returned {len(df)} rows")
             return df
