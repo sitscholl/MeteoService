@@ -3,11 +3,11 @@ FastAPI integration example for the MeteoDB timeseries database.
 This demonstrates how to expose the database via REST API for fast access to cached meteo data.
 """
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 import pytz
 import logging
 
@@ -20,6 +20,9 @@ config = load_config("config/config.yaml")
 
 logger = logging.getLogger(__name__)
 
+# Default timezone for the API (can be overridden by client)
+DEFAULT_TIMEZONE = config.get('api', {}).get('default_timezone', 'UTC')
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Meteorological Data API",
@@ -30,10 +33,20 @@ app = FastAPI(
 # Initialize QueryManager
 query_manager = QueryManager(config)
 
-# Database dependency
-def get_db() -> MeteoDB:
-    """Dependency to get database instance."""
-    return MeteoDB(config.get('database', {}).get('path', 'db/db.csv'))
+# Database dependency with proper context management
+async def get_db():
+    """
+    Dependency to get database instance with proper connection management.
+    Uses async context manager to ensure database is properly connected and disconnected.
+    """
+    db = MeteoDB(config.get('database', {}).get('path', 'db/db.csv'))
+    try:
+        # Enter the context manager to connect to the database
+        db.__enter__()
+        yield db
+    finally:
+        # Ensure database is properly disconnected
+        db.__exit__(None, None, None)
 
 def get_query_manager() -> QueryManager:
     """Dependency to get data manager instance."""
@@ -41,11 +54,49 @@ def get_query_manager() -> QueryManager:
 
 # Pydantic models for request/response
 class TimeseriesQuery(BaseModel):
-    provider: str = Field(..., description="provider name (e.g., 'SBR')")
-    start_time: datetime = Field(..., description="Start time (ISO format)")
-    end_time: datetime = Field(..., description="End time (ISO format)")
+    provider: str = Field(..., description="Provider name (e.g., 'SBR')")
+    start_time: datetime = Field(..., description="Start time (ISO format with timezone, e.g., '2025-01-15T10:30:00+01:00')")
+    end_time: datetime = Field(..., description="End time (ISO format with timezone, e.g., '2025-01-15T10:30:00+01:00')")
     tags: Optional[Dict[str, str]] = Field(None, description="Filter tags")
     fields: Optional[List[str]] = Field(None, description="Specific fields to return")
+    timezone: Optional[str] = Field(None, description="Timezone for naive datetimes (e.g., 'Europe/Rome'). Only used if start_time/end_time are timezone-naive.")
+
+    @field_validator('start_time', 'end_time', mode='before')
+    @classmethod
+    def ensure_timezone_aware(cls, v, info):
+        """Ensure datetime is timezone-aware, using timezone field if provided."""
+        if isinstance(v, str):
+            # Parse string to datetime
+            try:
+                v = datetime.fromisoformat(v.replace('Z', '+00:00'))
+            except ValueError:
+                # Try parsing without timezone info
+                v = datetime.fromisoformat(v)
+
+        if isinstance(v, datetime):
+            if v.tzinfo is None:
+                # Naive datetime - use timezone field or default
+                # In Pydantic v2, we need to get timezone from the data being validated
+                data = info.data if hasattr(info, 'data') else {}
+                tz_name = data.get('timezone', DEFAULT_TIMEZONE)
+                try:
+                    tz = pytz.timezone(tz_name)
+                    v = tz.localize(v)
+                except pytz.exceptions.UnknownTimeZoneError:
+                    raise ValueError(f"Unknown timezone: {tz_name}")
+
+        return v
+
+    @field_validator('timezone')
+    @classmethod
+    def validate_timezone(cls, v):
+        """Validate timezone string."""
+        if v is not None:
+            try:
+                pytz.timezone(v)
+            except pytz.exceptions.UnknownTimeZoneError:
+                raise ValueError(f"Unknown timezone: {v}")
+        return v
 
 class TimeseriesResponse(BaseModel):
     data: List[Dict[str, Any]]
@@ -66,7 +117,15 @@ async def root():
     return {
         "message": "Meteorological Data API",
         "version": "1.0.0",
-        "docs": "/docs"
+        "docs": "/docs",
+        "timezone_info": f"""
+            default_timezone: {DEFAULT_TIMEZONE},
+            supported_formats: [
+                "2025-01-15T10:30:00+01:00 (timezone-aware)",
+                "2025-01-15T10:30:00Z (UTC)",
+                "2025-01-15T10:30:00 (naive, uses timezone parameter or default)"
+            ]
+        """
     }
 
 @app.get("/health")
@@ -77,7 +136,7 @@ async def health_check(db: MeteoDB = Depends(get_db)):
         return {
             "status": "healthy",
             "providers_count": len(providers),
-            "timestamp": datetime.now(pytz.timezone(TIMEZONE))
+            "timestamp": datetime.now(pytz.timezone(DEFAULT_TIMEZONE))
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")
@@ -119,13 +178,13 @@ async def get_provider_tags(
 #     try:
 #         tags = {"station_id": station_id} if station_id else None
 #         time_range = db.get_time_range(provider, tags)
-
+#
 #         if not time_range:
 #             raise HTTPException(
 #                 status_code=404,
 #                 detail=f"No data found for provider '{provider
 #             )
-
+#
 #         return {
 #             "provider": provider,
 #             "start_time": time_range[0],
@@ -144,16 +203,15 @@ async def query_timeseries(
     db: MeteoDB = Depends(get_db),
     query_manager: QueryManager = Depends(get_query_manager)
 ):
-    """Query timeseries data with flexible filtering and smart data fetching."""
-    try:
-        # Ensure timezone awareness
-        if query.start_time.tzinfo is None:
-            tz = pytz.timezone(TIMEZONE)
-            query.start_time = query.start_time.replace(tzinfo=tz)
-        if query.end_time.tzinfo is None:
-            tz = pytz.timezone(TIMEZONE)
-            query.end_time = query.end_time.replace(tzinfo=tz)
+    """
+    Query timeseries data with flexible filtering and smart data fetching.
 
+    Supports timezone-aware datetime inputs in ISO format:
+    - "2025-01-15T10:30:00+01:00" (with timezone offset)
+    - "2025-01-15T10:30:00Z" (UTC)
+    - "2025-01-15T10:30:00" (naive, uses timezone parameter or default)
+    """
+    try:
         # Validate time range
         if query.start_time >= query.end_time:
             raise HTTPException(
@@ -182,14 +240,21 @@ async def query_timeseries(
                 metadata={
                     "provider": query.provider,
                     "tags": query.tags,
-                    "fields": query.fields
+                    "fields": query.fields,
+                    "timezone_used": str(query.start_time.tzinfo)
                 }
             )
 
         # Convert DataFrame to list of dictionaries
         data = []
         for timestamp, row in df.iterrows():
-            record = {"datetime": timestamp}
+            # Ensure timestamp is serializable (use ISO format when possible)
+            try:
+                ts_val = timestamp.isoformat()
+            except Exception:
+                ts_val = str(timestamp)
+
+            record = {"datetime": ts_val}
             record.update(row.to_dict())
             data.append(record)
 
@@ -204,7 +269,9 @@ async def query_timeseries(
                 "provider": query.provider,
                 "tags": query.tags,
                 "fields": list(df.columns),
-                "data_types": {col: str(dtype) for col, dtype in df.dtypes.items()}
+                "data_types": {col: str(dtype) for col, dtype in df.dtypes.items()},
+                "query_timezone": str(query.start_time.tzinfo),
+                "result_timezone": str(df.index.tz) if getattr(df.index, "tz", None) is not None else None
             }
         )
 
