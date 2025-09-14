@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 tz = pytz.timezone("Europe/Rome")
 provider_query = 'SBR'
 query_start = datetime(2025,8,25, tzinfo = tz)
-query_end = datetime(2025,9,15, tzinfo = tz)
+query_end = datetime(2025,8,26, tzinfo = tz)
 station = 103
 fields = None
 
