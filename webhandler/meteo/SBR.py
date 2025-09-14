@@ -2,6 +2,7 @@ import requests
 import logging
 import datetime
 import pandas as pd
+import numpy as np
 import re
 import time
 from typing import Any, Dict, List
@@ -127,10 +128,6 @@ class SBR(BaseMeteoHandler):
             List[str]: List of raw HTML response texts from the website
         """
         
-        # Validate required parameters
-        if not all([station_id, start, end]):
-            raise ValueError("station_id, start, and end are required parameters")
-
         start = start.astimezone(pytz.timezone(self.timezone))
         end = end.astimezone(pytz.timezone(self.timezone))
         
@@ -248,7 +245,7 @@ class SBR(BaseMeteoHandler):
             unit = sbr_colmap.get(col, {'einheit': ''})['einheit']
             try:
                 if unit in ['mm', 'degC', '%', 'm*s-1']:
-                    tbl_re[col] = pd.to_numeric(tbl_re[col], errors='coerce')
+                    tbl_re[col] = tbl_re[col].astype(np.float64)
                 elif unit == 'Ein/Aus':
                     tbl_re[col] = tbl_re[col].astype(bool).astype(int)
                 else:
