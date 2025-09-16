@@ -297,6 +297,7 @@ class SBR(BaseMeteoHandler):
             if 'rainStart' in tbl.columns:
                 tbl['rainStart'] = tbl['rainStart'].apply(lambda x: x.strip('"') if pd.notna(x) else x)
                 tbl['rainStart'] = pd.to_datetime(tbl['rainStart'], format='%Y-%m-%d %H', errors='coerce')
+                tbl['rainStart'] = tbl['rainStart'].dt.tz_localize(tz = self.timezone).dt.tz_convert('UTC')
         except (ValueError, TypeError) as e:
             logger.warning(f"Error converting rainStart: {e}")
 
