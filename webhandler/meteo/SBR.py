@@ -111,7 +111,8 @@ class SBR(BaseMeteoHandler):
             end: datetime.datetime,
             data_type: str,
             sleep_time: int = 1,
-            request_batch_size = 7
+            request_batch_size = 7,
+            **kwargs
         ) -> List[str]:
         """
         Query the raw data from the SBR website.
