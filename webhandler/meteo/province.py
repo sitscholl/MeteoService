@@ -24,7 +24,7 @@ PROVINCE_RENAME = {
     "Q": "discharge"
 }
 
-class Province(BaseMeteoHandler):
+class ProvinceMeteo(BaseMeteoHandler):
 
     base_url = "http://daten.buergernetz.bz.it/services/meteo/v1"
     sensors_url = base_url + "/sensors"
@@ -129,7 +129,7 @@ if __name__ == '__main__':
     start = datetime.datetime(2025, 1, 14)
     end = datetime.datetime(2025, 1, 16)
 
-    pr_handler = Province(timezone = 'CET')
+    pr_handler = ProvinceMeteo(timezone = 'CET')
     data = pr_handler.run(
         station_id = '86900MS',
         sensor_codes = ["LT"],
