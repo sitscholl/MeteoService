@@ -102,39 +102,6 @@ class BaseMeteoHandler(ABC):
         """
         return self.output_schema.validate(transformed_data)
 
-    def save(
-        self, 
-        validated_data: pd.DataFrame,
-        output_path: Optional[str],
-        provider: str,
-        tags: Dict[str, Any] | None = None,
-        fields: List[str] | None = None,
-        skip_existing = True) -> Dict[str, int]:
-        """
-        Save the validated data to a database
-                
-        Args:
-            validated_data (pd.DataFrame): Validated data to save
-            output_path (Optional[str]): Path where to save the data
-        """
-        with MeteoDB(output_path) as db:
-
-            insert_stats = db.insert_data(
-                validated_data, 
-                provider=provider, 
-                tags=tags, 
-                fields=fields,
-                skip_existing = skip_existing
-                )
-                
-            logger.info(f"""
-                    Inserted {insert_stats['inserted']} rows into database, 
-                    skipped {insert_stats['skipped']} rows 
-                    and failed at {insert_stats['errors']} rows.
-                """)
-                
-        return insert_stats
-
     def run(self, drop_columns = False, **kwargs) -> pd.DataFrame:
         """
         Run the complete data processing pipeline.
@@ -157,9 +124,5 @@ class BaseMeteoHandler(ABC):
 
         if drop_columns:
             validated_data = validated_data[[i for i in validated_data.columns if i in self.output_schema.columns]]
-        
-        # Save if output_path is provided
-        if 'output_path' in kwargs:
-            self.save(validated_data, kwargs['output_path'])
-            
+                    
         return validated_data
