@@ -367,7 +367,7 @@ class MeteoDB:
 
 if __name__ == '__main__':
 
-    from webhandler.meteo.SBR import SBR
+    from webhandler.meteo.SBR import SBRMeteo
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -377,7 +377,7 @@ if __name__ == '__main__':
 
     tz = pytz.timezone("Europe/Rome")
 
-    with SBR(args.username, args.password, timezone = "Europe/Rome") as client:
+    with SBRMeteo(args.username, args.password, timezone = "Europe/Rome") as client:
         data = client.run(
             station_id="103",
             start=datetime(2025, 9, 1, 0, 0),

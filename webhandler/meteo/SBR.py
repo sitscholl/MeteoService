@@ -33,7 +33,7 @@ SBR_RENAME = {
         "rainStart": "rain_start"
 }
 
-class SBR(BaseMeteoHandler):
+class SBRMeteo(BaseMeteoHandler):
     """
     A class to interact with the SBR (Beratungsring) website for retrieving weather station data.
     Handles login, session management, and data extraction.
