@@ -135,7 +135,7 @@ def validate_date(date, target_format = "%d.%m.%Y"):
     except ValueError:
         raise ValueError(f'Start date needs to be in {target_format} format. Got {date}')
 
-def split_dates(start_date, end_date, n_days = 7):
+def split_dates(start_date, end_date, n_days = 7, split_on_year = False):
     """
     Create a list of (start, end) date tuples that each span n_days, 
     covering the period from start_date to end_date.
@@ -161,6 +161,10 @@ def split_dates(start_date, end_date, n_days = 7):
     while current_start < end_date:
         potential_end = current_start + timedelta(days=n_days)
         current_end = min(potential_end, end_date)
+
+        if split_on_year and (current_end.year != current_start.year):
+            current_end = datetime.datetime(current_start.year, 12, 31) #check if this works if query does not inlcude last date?
+
         date_pairs.append((current_start, current_end))
         current_start = current_end
     
