@@ -12,6 +12,7 @@ dependencies = [
     "pyyaml>=6.0",
     "requests>=2.32.3",
     "selenium>=4.31.0",
+    "sqlalchemy>=2.0.43",
     "tinyflux>=1.0.0",
     "uvicorn>=0.35.0",
     "webdriver-manager>=4.0.2",
