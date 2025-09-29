@@ -16,7 +16,7 @@ class Station(Base):
     latitude = Column(Float)
     longitude = Column(Float)
     elevation = Column(Float)
-    metadata = Column(JSON)
+    station_metadata = Column(JSON)
     
     __table_args__ = (UniqueConstraint("provider", "external_id"), )
 
@@ -27,7 +27,7 @@ class Variable(Base):
     __tablename__ = "variables"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False)   # e.g. "temperature_2m"
+    name = Column(String, nullable=False, unique=True)   # e.g. "temperature_2m"
     unit = Column(String)
     description = Column(Text)
 
