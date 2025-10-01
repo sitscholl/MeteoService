@@ -3,8 +3,6 @@ import pandas as pd
 import pandera.pandas as pa
 from typing import Any, Dict, Optional, List
 
-from webhandler.db import MeteoDB
-
 class BaseMeteoHandler(ABC):
     """
     Abstract base class for meteorological data handlers.
