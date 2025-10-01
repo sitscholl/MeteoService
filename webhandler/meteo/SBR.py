@@ -38,6 +38,9 @@ class SBRMeteo(BaseMeteoHandler):
     A class to interact with the SBR (Beratungsring) website for retrieving weather station data.
     Handles login, session management, and data extraction.
     """
+
+    provider_name = 'sbr'
+
     base_url = "https://www3.beratungsring.org"
     login_url = base_url + "/mein-sbr/login"
     stationdata_url = base_url + "/wetterstationen-custom"

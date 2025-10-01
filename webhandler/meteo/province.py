@@ -26,6 +26,8 @@ PROVINCE_RENAME = {
 
 class ProvinceMeteo(BaseMeteoHandler):
 
+    provider_name = 'province'
+
     base_url = "http://daten.buergernetz.bz.it/services/meteo/v1"
     sensors_url = base_url + "/sensors"
     stations_url = base_url + "/stations"
