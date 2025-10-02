@@ -12,7 +12,7 @@ class ProviderManager:
     for easy access to provider implementations.
     """
     
-    def __init__(self, ignore_modules: list[str] = None):
+    def __init__(self, provider_config: Dict[str, Dict], ignore_modules: list[str] = None):
         """
         Initialize the provider manager and discover all available providers.
         
@@ -23,7 +23,10 @@ class ProviderManager:
             ignore_modules = ['base', '__pycache__']
             
         self.registry: Dict[str, Type] = {}
+        self.providers: Dict[str, Type] = {}
+
         self._discover_providers(ignore_modules)
+        self._initialize_providers(provider_config)
     
     def _discover_providers(self, ignore_modules: list[str]):
         """
@@ -64,6 +67,16 @@ class ProviderManager:
                 name != 'BaseMeteoHandler'):
                 
                 self.registry[obj.provider_name] = obj
+
+    def _initialize_providers(self, provider_config: Dict[str, Dict]) -> None:
+        for provider_name, config in provider_config.items():
+            provider_class = self.get_provider(provider_name)
+
+            if provider_class is None:
+                raise ValueError(f"Provider '{provider_name}' not found in registry.")
+
+            self.providers[provider_name] = provider_class(**config)
+            logger.info(f"Initialized provider '{provider_name}'")
     
     def get_provider(self, provider_name: str) -> Optional[Type]:
         """
@@ -75,7 +88,7 @@ class ProviderManager:
         Returns:
             The provider class if found, None otherwise
         """
-        return self.registry.get(provider_name)
+        return self.providers.get(provider_name)
     
     def list_providers(self) -> list[str]:
         """
@@ -84,7 +97,7 @@ class ProviderManager:
         Returns:
             List of provider names
         """
-        return list(self.registry.keys())
+        return list(self.providers.keys())
     
     def create_provider(self, provider_name: str, **kwargs):
         """
