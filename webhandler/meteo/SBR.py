@@ -135,8 +135,8 @@ class SBRMeteo(BaseMeteoHandler):
         
         station_props = station_info[0]['properties']
         return {
-            'lat': station_props.get('lat'),
-            'lon': station_props.get('lon'),
+            'latitude': station_props.get('lat'),
+            'longitude': station_props.get('lon'),
             'elevation': None,
             'name': station_props.get('st_name')
         }

@@ -75,8 +75,8 @@ class ProvinceMeteo(BaseMeteoHandler):
         
         station_props = station_info[0]['properties']
         return {
-            'lat': station_props.get('LAT'),
-            'lon': station_props.get('LONG'),
+            'latitude': station_props.get('LAT'),
+            'longitude': station_props.get('LONG'),
             'elevation': station_props.get('ALT'),
             'name': station_props.get('NAME_D')
         }
