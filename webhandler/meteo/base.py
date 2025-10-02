@@ -22,6 +22,20 @@ class BaseMeteoHandler(ABC):
         pass
 
     @abstractmethod
+    def get_station_info(self, station_id: str) -> Dict[str, Any]:
+        """
+        Query information for a given station from the source, 
+        such as elevation, latitude or longitude.
+
+        Args:
+            station_id (str): The unique identifier for the station.
+
+        Returns:
+            dict: A dictionary containing station information such as elevation, latitude, and longitude.
+        """
+        pass
+
+    @abstractmethod
     def get_data(self, **kwargs) -> pd.DataFrame:
         """
         Query the raw data from the source.

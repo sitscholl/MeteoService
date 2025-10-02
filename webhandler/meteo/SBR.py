@@ -1,15 +1,18 @@
+import pandas as pd
+import json
+
 import requests
 import logging
 import datetime
-import pandas as pd
 import numpy as np
 import re
 import time
 from typing import Any, Dict, List
 import pytz
+from pathlib import Path
 
-from webhandler.config import sbr_colmap
-from webhandler.utils import split_dates
+from ..config import sbr_colmap
+from ..utils import split_dates
 from .base import BaseMeteoHandler
 
 logger = logging.getLogger(__name__)
@@ -43,7 +46,8 @@ class SBRMeteo(BaseMeteoHandler):
 
     base_url = "https://www3.beratungsring.org"
     login_url = base_url + "/mein-sbr/login"
-    stationdata_url = base_url + "/wetterstationen-custom"
+    timeseries_url = base_url + "/wetterstationen-custom"
+    stations_url = 'data/sbr.geojson'
     user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 
     def __init__(self, username: str, password: str, timezone: str, **kwargs):
@@ -107,6 +111,36 @@ class SBRMeteo(BaseMeteoHandler):
             self._session.close()
             self._session = None
 
+    def get_station_info(self, station_id: str) -> dict[str, Any]:
+        """
+        Get station information from local file, as no API available
+        """
+
+        station_info_file = Path(self.stations_url)
+        if not station_info_file.exists():
+            logger.warning(f"File {station_info_file} does not exist. Cannot fetch SBR station info.")
+            return {}
+
+        if isinstance(station_id, int):
+            station_id = str(station_id)
+
+        with station_info_file.open("r", encoding="utf-8") as file:
+            response_data = json.load(file)
+
+        station_info = [i for i in response_data['features'] if i['properties']['st_id'] == station_id]
+
+        if len(station_info) == 0 :
+            logger.warning(f"No metadata found for {station_id}")
+            return {}
+        
+        station_props = station_info[0]['properties']
+        return {
+            'lat': station_props.get('lat'),
+            'lon': station_props.get('lon'),
+            'elevation': None,
+            'name': station_props.get('st_name')
+        }
+
     def get_data(
             self,
             station_id: str | int,
@@ -168,7 +202,7 @@ class SBRMeteo(BaseMeteoHandler):
                 "dateto": f"{end_date:%Y.%m.%d %H:%M}",
             }
 
-            response = self.session.get(self.stationdata_url, params=data_params, headers=data_headers)
+            response = self.session.get(self.timeseries_url, params=data_params, headers=data_headers)
             response.raise_for_status()
             
             logger.debug(f"Response url: {response.request.url}")
@@ -320,3 +354,9 @@ class SBRMeteo(BaseMeteoHandler):
             logger.warning(f"Error converting Datum: {e}")
 
         return tbl
+
+
+if __name__ == "__main__":
+
+    sbr_handler = SBRMeteo('a', 'b', timezone = 'CET')
+    print(sbr_handler.get_station_info('-3'))

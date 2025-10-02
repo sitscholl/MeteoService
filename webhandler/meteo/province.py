@@ -1,10 +1,10 @@
-from tkinter import N
 import pandas as pd
 
 import datetime
 import requests
 import pytz
 import time
+from typing import Dict, Any
 
 from webhandler.meteo.base import BaseMeteoHandler
 from webhandler.utils import split_dates
@@ -56,9 +56,30 @@ class ProvinceMeteo(BaseMeteoHandler):
         if self.station_codes is not None:
             return self.station_codes
         response = requests.get(self.stations_url)
+        response.raise_for_status()
         stations_list = set([i['properties']['SCODE'] for i in response.json()['features']])
         self.station_codes = stations_list
         return stations_list
+
+    def get_station_info(self, station_id: str) -> Dict[str, Any]:
+
+        response = requests.get(self.stations_url)
+        response.raise_for_status()
+
+        response_data = response.json()
+        station_info = [i for i in response_data['features'] if i['properties']['SCODE'] == station_id]
+
+        if len(station_info) == 0 :
+            logger.warning(f"No metadata found for {station_id}")
+            return {}
+        
+        station_props = station_info[0]['properties']
+        return {
+            'lat': station_props.get('LAT'),
+            'lon': station_props.get('LONG'),
+            'elevation': station_props.get('ALT'),
+            'name': station_props.get('NAME_D')
+        }
 
     def get_data(
             self,            
@@ -132,6 +153,7 @@ if __name__ == '__main__':
     end = datetime.datetime(2025, 1, 16)
 
     pr_handler = ProvinceMeteo(timezone = 'CET')
+    print(pr_handler.get_station_info("86900MS"))
     data = pr_handler.run(
         station_id = '86900MS',
         sensor_codes = ["LT"],
