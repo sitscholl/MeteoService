@@ -3,6 +3,9 @@ import importlib
 import pkgutil
 import inspect
 from typing import Dict, Type, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 class ProviderManager:
     """
@@ -66,16 +69,16 @@ class ProviderManager:
                 obj.__module__ == module.__name__ and  # Only classes defined in this module
                 name != 'BaseMeteoHandler'):
                 
-                self.registry[obj.provider_name] = obj
+                self.registry[obj.provider_name.lower()] = obj
 
     def _initialize_providers(self, provider_config: Dict[str, Dict]) -> None:
         for provider_name, config in provider_config.items():
-            provider_class = self.get_provider(provider_name)
+            provider_class = self.registry.get(provider_name)
 
             if provider_class is None:
                 raise ValueError(f"Provider '{provider_name}' not found in registry.")
 
-            self.providers[provider_name] = provider_class(**config)
+            self.providers[provider_name.lower()] = provider_class(**config)
             logger.info(f"Initialized provider '{provider_name}'")
     
     def get_provider(self, provider_name: str) -> Optional[Type]:
@@ -113,7 +116,7 @@ class ProviderManager:
         Raises:
             ValueError: If the provider is not found
         """
-        provider_class = self.get_provider(provider_name)
+        provider_class = self.registry.get(provider_name)
         if provider_class is None:
             raise ValueError(f"Provider '{provider_name}' not found. Available providers: {self.list_providers()}")
         

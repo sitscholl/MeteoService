@@ -9,6 +9,7 @@ import pytz
 from typing import Optional, Dict, List, Any
 
 from . import models
+from ..provider_manager import ProviderManager
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,12 @@ class MeteoDB:
         self.engine = create_engine(engine)
         models.Base.metadata.create_all(self.engine)
         self.session = sessionmaker(bind=self.engine, autocommit = False, autoflush = False)()
+        self.provider_manager_initialized = False
+
+    def initialize_provider_manager(self, provider_manager: ProviderManager):
+        self.provider_manager = provider_manager
+        self.provider_manager_initialized = True
+        logger.info("Provider manager initialized successfully.")
 
     def query_station(self, provider: str | None = None, external_id: str | None = None):
         query = self.session.query(models.Station)
@@ -47,8 +54,24 @@ class MeteoDB:
         if existing_station:
             return existing_station[0]
 
+        #Fetch station information
+        if not self.provider_manager_initialized:
+            logger.info("ProviderManager is not initialized. Cannot fetch station info")
+        else:
+            try:
+                provider_handler = self.provider_manager.get_provider(provider.lower())
+
+                if provider_handler is None:
+                    raise ValueError(f"Provider handler for provider '{provider}' could not be found. Available providers: {self.provider_manager.list_providers()}")
+
+                station_info = provider_handler.get_station_info(external_id)
+                station_info.update(**kwargs)
+            except Exception as e:
+                logger.error(f"Error fetching station information: {e}")
+                station_info = kwargs
+
         try:
-            new_station = models.Station(provider = provider, external_id = external_id, **kwargs)
+            new_station = models.Station(provider = provider, external_id = external_id, **station_info)
             self.session.add(new_station)
             self.session.commit()
             logger.info(f"New station {new_station.external_id} inserted successfully.")
@@ -82,8 +105,6 @@ class MeteoDB:
         self, 
         data: pd.DataFrame, 
         provider: str,
-        station_attrs: Dict = {},
-        variable_attrs: Dict = {},
         index=False, index_label=None, if_exists='append'):
         """
         Insert measurement data into the database. All columns other than 'datetime' and 'station_id' are assumed to contain variables and will be inserted into the Measurement table.
@@ -121,14 +142,14 @@ class MeteoDB:
 
             #Get internal station entry and create if it does not exist
             # ##TODO: Query station info from provider class and get all attributes 
-            station_entry = self.insert_station(provider, st_id, **station_attrs.get(st_id, {}))
+            station_entry = self.insert_station(provider, st_id)
 
             if station_entry is None:
                 logger.warning(f"Skipping insertion of data from {st_id} as station could not be inserted into database")
                 continue
 
             for var in variable_columns:
-                variable_entry = self.insert_variable(name=var, **variable_attrs.get(var, {}))
+                variable_entry = self.insert_variable(name=var)
 
                 if variable_entry is None:
                     logger.warning(f"Skipping insertion of data from {st_id} and variable {var} as variable could not be inserted into database")
@@ -156,16 +177,20 @@ class MeteoDB:
 
 if __name__ == "__main__":
     import numpy as np
-    from datetime import datetime
+    from ..config import load_config
+
+    config = load_config('config/config.yaml')
 
     # Create database instance
     meteo_db = MeteoDB()
+    provider_manager = ProviderManager(provider_config = config['providers'])
+    meteo_db.initialize_provider_manager(provider_manager)
 
     # Example 2: Insert data with automatic station and variable creation
     # Create sample data with external station IDs and variable names
     df = pd.DataFrame({
         'datetime': np.datetime64('2017-01-01') + np.array([np.timedelta64(i, 'D') for i in np.random.randint(0, 1000, size = 4)]),
-        'station_id': ['station_1', 'station_1', 'station_2', 'station_2'],
+        'station_id': ['3', '3', '32', '32'],
         "tair_2m": np.random.rand(4),                           # Temperature 2m8
         "tsoil_25cm": np.random.rand(4),     # Soil temperature -25cm
         "tdry_60cm": np.random.rand(4),           # Dry temperature 60cm
