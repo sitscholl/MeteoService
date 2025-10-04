@@ -72,11 +72,12 @@ class ProviderManager:
                 self.registry[obj.provider_name.lower()] = obj
 
     def _initialize_providers(self, provider_config: Dict[str, Dict]) -> None:
-        for provider_name, config in provider_config.items():
-            provider_class = self.registry.get(provider_name)
+        for provider_name, provider_class in self.registry.items():
+            config = provider_config.get(provider_name)
 
-            if provider_class is None:
-                raise ValueError(f"Provider '{provider_name}' not found in registry.")
+            if config is None:
+                logger.warning(f"No configuration found for Provider '{provider_name}'. Skipping.")
+                continue
 
             self.providers[provider_name.lower()] = provider_class(**config)
             logger.info(f"Initialized provider '{provider_name}'")
