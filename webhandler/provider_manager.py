@@ -79,8 +79,12 @@ class ProviderManager:
                 logger.warning(f"No configuration found for Provider '{provider_name}'. Skipping.")
                 continue
 
-            self.providers[provider_name.lower()] = provider_class(**config)
-            logger.info(f"Initialized provider '{provider_name}'")
+            try:
+                self.providers[provider_name.lower()] = provider_class(**config)
+                logger.info(f"Initialized provider '{provider_name}'")
+            except Exception as e:
+                logger.error(f"Failed to initialize provider '{provider_name}': {e}")
+                continue
     
     def get_provider(self, provider_name: str) -> Optional[Type]:
         """
