@@ -14,6 +14,7 @@ import logging
 from webhandler.config import load_config
 from webhandler.db import MeteoDB
 from webhandler.query_manager import QueryManager
+from webhandler.provider_manager import ProviderManager
 
 # Load config file
 config = load_config("config/config.yaml")
@@ -30,8 +31,12 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Initialize ProviderManager
+provider_manager = ProviderManager(config['providers'])
+
 # Initialize QueryManager
 query_manager = QueryManager(config)
+query_manager.initialize_provider_manager(provider_manager)
 
 # Database dependency with proper context management
 async def get_db():
@@ -40,6 +45,7 @@ async def get_db():
     Uses async context manager to ensure database is properly connected and disconnected.
     """
     db = MeteoDB(config.get('database', {}).get('path', 'db/db.csv'))
+    db.initialize_provider_manager(provider_manager)
     try:
         # Enter the context manager to connect to the database
         db.__enter__()

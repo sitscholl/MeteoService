@@ -16,30 +16,12 @@ class QueryManager:
     def __init__(self, config: dict[str, Any]):
         """Initialize DataManager with configuration."""
         self.config = config
-        self.providers = self._initialize_providers()
+        self.provider_manager_initialized = False
     
-    def _initialize_providers(self) -> Dict:
-        """Initialize available data providers."""
-        providers = {}
-        for provider_name, provider_config in self.config.get('providers', {}).items():
-            if provider_config.get('enabled', False):
-                try:
-                    module_path, class_name = provider_config['class'].rsplit('.', 1)
-                    provider_module = importlib.import_module(module_path)
-                    provider_class = getattr(provider_module, class_name)
-                except Exception as e:
-                    logger.error(f"Error initializing provider class {provider_config['class']}: {e}. Not using provider {provider_name}.")
-                    continue
-
-                providers[provider_name.lower()] = {
-                    'class': provider_class,
-                    'credentials': {
-                        **{key: value for key, value in provider_config.items() if key != 'class'}
-                    }
-                }
-        
-        logger.info(f"Initialized providers: {list(providers.keys())}")
-        return providers
+    def initialize_provider_manager(self, provider_manager: ProviderManager):
+        self.provider_manager = provider_manager
+        self.provider_manager_initialized = True
+        logger.info("Provider manager added to QueryManager.")
     
     def _find_data_gaps(self, existing_data: pd.DataFrame, start_time: datetime,
                         end_time: datetime) -> List[Tuple[datetime, datetime]]:
@@ -81,14 +63,15 @@ class QueryManager:
         if not gaps:
             return pd.DataFrame()
         
-        provider_info = self.providers[provider_name.lower()]
-        provider_class = provider_info['class']
-        provider_kwargs = provider_info['credentials']
-        
         all_data = []
+
+        # Find which provider to use
+        if self.provider_manager.get_provider(provider_name.lower()) is None:
+            logger.info(f"No provider available for provider: {provider}. Missing data cannot be requested.")
+            return pd.DataFrame()
         
         try:
-            with provider_class(**provider_kwargs) as provider:
+            with self.provider_manager.get_provider(provider_name.lower()) as provider:
                 for start_gap, end_gap in gaps:
                     # Check if gap is within reasonable limits
                     gap_days = (end_gap - start_gap).days
@@ -158,12 +141,7 @@ class QueryManager:
         # Check if auto-fetch is enabled
         if not self.config.get('settings', {}).get('auto_fetch_missing_data', True):
             return existing_data
-        
-        # Find which provider to use
-        if not provider.lower() in self.providers.keys():
-            logger.info(f"No provider available for provider: {provider}")
-            return existing_data
-        
+                
         # Find gaps in the data
         gaps = self._find_data_gaps(existing_data, start_time, end_time)
         
