@@ -1,11 +1,11 @@
 import pandas as pd
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Dict, Optional, Tuple, Any
-import importlib
 
-from webhandler.db import MeteoDB
+from webhandler.database.db import MeteoDB
+from webhandler.provider_manager import ProviderManager
 from webhandler.utils import derive_datetime_gaps
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ class QueryManager:
 
         # Find which provider to use
         if self.provider_manager.get_provider(provider_name.lower()) is None:
-            logger.info(f"No provider available for provider: {provider}. Missing data cannot be requested.")
+            logger.info(f"No provider available for provider: {provider_name}. Missing data cannot be requested.")
             return pd.DataFrame()
         
         try:
@@ -104,7 +104,7 @@ class QueryManager:
     
     def get_data(self, db: MeteoDB, provider: str, start_time: datetime,
                  end_time: datetime, tags: Dict,
-                 fields: Optional[List[str]] = None) -> pd.DataFrame:
+                 variables: Optional[List[str]] = None) -> pd.DataFrame:
         """
         Get data from database and fetch missing data from providers if needed.
 
@@ -114,7 +114,7 @@ class QueryManager:
             start_time: Start time for data query (must be timezone-aware)
             end_time: End time for data query (must be timezone-aware)
             tags: Optional tags for filtering
-            fields: Optional list of fields to return
+            variables: Optional list of variables to return
 
         Returns:
             Complete dataset combining database and newly fetched data
@@ -126,7 +126,7 @@ class QueryManager:
         if end_time.tzinfo is None:
             raise ValueError("end_time must be timezone-aware")
 
-        if not 'station_id' in tags.keys():
+        if 'station_id' not in tags.keys():
             raise ValueError("The 'station_id' key must be provided in the tags.")
 
         # First, get existing data from database
@@ -135,7 +135,7 @@ class QueryManager:
             start_time=start_time,
             end_time=end_time,
             tags=tags,
-            fields=fields
+            variables=variables
         )
         
         # Check if auto-fetch is enabled
@@ -163,7 +163,7 @@ class QueryManager:
                     start_time=start_time,
                     end_time=end_time,
                     tags=tags,
-                    fields=fields
+                    variables=variables
                 )
                 return complete_data
                 
