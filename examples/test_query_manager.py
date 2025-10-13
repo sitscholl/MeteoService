@@ -1,11 +1,12 @@
 import logging
 import logging.config
-from datetime import datetime, timezone
+from datetime import datetime
 import pytz
 
 from webhandler.query_manager import QueryManager
 from webhandler.config import load_config
-from webhandler.db import MeteoDB
+from webhandler.database.db import MeteoDB
+from webhandler.provider_manager import ProviderManager
 
 config = load_config("config/config.yaml")
 
@@ -17,19 +18,22 @@ provider_query = 'SBR'
 query_start = datetime(2025,8,25, tzinfo = tz)
 query_end = datetime(2025,8,26, tzinfo = tz)
 station = 103
-fields = None
+variables = None
 
-
+meteo_db = MeteoDB()
 query_manager = QueryManager(config)
+provider_manager = ProviderManager(provider_config = config['providers'])
 
-with MeteoDB('db/db_test.csv') as db:
-    data_query = query_manager.get_data(
-        db = db, 
-        provider = provider_query, 
-        start_time = query_start, 
-        end_time = query_end, 
-        tags = {'station_id': station}, 
-        fields = fields
+meteo_db.initialize_provider_manager(provider_manager)
+query_manager.initialize_provider_manager(provider_manager)
+
+data_query = query_manager.get_data(
+    db = meteo_db, 
+    provider = provider_query, 
+    station_id = station, 
+    start_time = query_start, 
+    end_time = query_end, 
+    variables = variables
     )
 
 print(data_query)
