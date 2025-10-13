@@ -56,14 +56,17 @@ class QueryManager:
             logger.error(f"Error finding data gaps: {e}")
             return [(start_time, end_time)]  # Return full range as gap on error
     
-    def _fetch_missing_data(self, provider_name: str, 
-                           gaps: List[Tuple[datetime, datetime]], 
-                           tags: Optional[Dict] = None) -> pd.DataFrame:
+    def _fetch_missing_data(self, provider_name: str, station_id: str,
+                           gaps: List[Tuple[datetime, datetime]]) -> pd.DataFrame:
         """Fetch missing data from the specified provider."""
         if not gaps:
             return pd.DataFrame()
         
         all_data = []
+
+        if not hasattr(self, 'provider_manager'):
+            logger.warning("No provider_manager initialized for query_manager. Cannot fetch missing data")
+            return pd.DataFrame()
 
         # Find which provider to use
         if self.provider_manager.get_provider(provider_name.lower()) is None:
@@ -88,7 +91,7 @@ class QueryManager:
                         start=start_gap,
                         end=end_gap,
                         data_type = 'meteo',
-                        station_id = tags['station_id']
+                        station_id = station_id
                     )
                     
                     if not provider_data.empty:
@@ -102,9 +105,15 @@ class QueryManager:
             return pd.concat(all_data, ignore_index=True)
         return pd.DataFrame()
     
-    def get_data(self, db: MeteoDB, provider: str, start_time: datetime,
-                 end_time: datetime, tags: Dict,
-                 variables: Optional[List[str]] = None) -> pd.DataFrame:
+    def get_data(
+            self, 
+            db: MeteoDB, 
+            provider: str, 
+            station_id: str,
+            start_time: datetime,
+            end_time: datetime, 
+            variables: Optional[List[str]] = None
+        ) -> pd.DataFrame:
         """
         Get data from database and fetch missing data from providers if needed.
 
@@ -113,7 +122,6 @@ class QueryManager:
             provider: provider name (corresponds to provider name in config.yaml --> providers)
             start_time: Start time for data query (must be timezone-aware)
             end_time: End time for data query (must be timezone-aware)
-            tags: Optional tags for filtering
             variables: Optional list of variables to return
 
         Returns:
@@ -125,16 +133,15 @@ class QueryManager:
             raise ValueError("start_time must be timezone-aware")
         if end_time.tzinfo is None:
             raise ValueError("end_time must be timezone-aware")
-
-        if 'station_id' not in tags.keys():
-            raise ValueError("The 'station_id' key must be provided in the tags.")
+        if not isinstance(station_id, str):
+            station_id = str(station_id)
 
         # First, get existing data from database
         existing_data = db.query_data(
             provider=provider,
+            station_id=station_id,
             start_time=start_time,
             end_time=end_time,
-            tags=tags,
             variables=variables
         )
         
@@ -150,19 +157,19 @@ class QueryManager:
             return existing_data
         
         # Fetch missing data
-        new_data = self._fetch_missing_data(provider, gaps, tags)
+        new_data = self._fetch_missing_data(provider, station_id, gaps)
         
         if not new_data.empty:
             try:
                 # Save new data to database
-                db.insert_data(new_data, provider, tags)
+                db.insert_data(new_data, provider)
                 
                 # Re-query database to get complete dataset
                 complete_data = db.query_data(
                     provider=provider,
+                    station_id=station_id,
                     start_time=start_time,
                     end_time=end_time,
-                    tags=tags,
                     variables=variables
                 )
                 return complete_data

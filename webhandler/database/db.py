@@ -3,6 +3,8 @@ from sqlalchemy.orm import sessionmaker
 import pandas as pd
 
 import logging
+from datetime import datetime, timezone
+import pytz
 
 from . import models
 from ..provider_manager import ProviderManager
@@ -36,10 +38,37 @@ class MeteoDB:
             query = query.filter(models.Variable.name == name)
         return query.all()
 
-    def query_data(self):
-        query = self.session.query(models.Measurement).all()
+    def query_data(
+            self,
+            provider: str,
+            station_id: str,
+            start_time: datetime,
+            end_time: datetime,
+            variables: list[str] | None = None,
+        ):
 
-        return query
+        orig_timezone = start_time.tzinfo
+        start_time_utc = start_time.astimezone(timezone.utc)
+        end_time_utc = end_time.astimezone(timezone.utc)
+
+        query = self.session.query(models.Measurement).filter(models.Station.external_id == station_id, models.Measurement.datetime.between(start_time_utc, end_time_utc))
+
+        if variables is not None:
+            query = query.filter(models.Measurement.variable_id.in_([v.id for v in self.query_variable(name=variables)]))
+
+        df = pd.read_sql_query(sql = query.statement, con = self.engine)
+
+        if not df.empty:
+            try:
+                df.set_index('datetime', inplace = True)
+                df.index = df.index.dt.tz_localite(timezone.utc).tz_convert(orig_timezone)
+            except Exception as e:
+                logger.warning(f"Could not convert timezone back to {orig_timezone}: {e}. Keeping UTC timezone.")
+                # Ensure index is UTC-aware if conversion fails
+                if df.index.tz is None:
+                    df.index = df.index.tz_localize('UTC')
+
+        return df
 
     def insert_station(self, provider: str, external_id: str, **kwargs):
         """
@@ -152,6 +181,7 @@ class MeteoDB:
                     continue
 
                 measurements = station_data[['datetime', var]].copy()
+                measurements['datetime'] = measurements['datetime'].dt.tz_convert('UTC')
                 measurements['station_id'] = station_entry.id
                 measurements['variable_id'] = variable_entry.id
                 measurements.rename(columns = {var: 'value'}, inplace = True)
