@@ -109,7 +109,7 @@ class ProvinceMeteo(BaseMeteoHandler):
             if not isinstance(sensor_codes, list):
                 raise ValueError(f"Sensor_codes must be of type list. Got {type(sensor_codes)}")
             for sensor in sensor_codes:
-                if not sensor in self.get_sensors_for_station(station_id):
+                if sensor not in self.get_sensors_for_station(station_id):
                     raise ValueError(f"Invalid sensor {sensor}. Choose from: {self.get_sensors_for_station(station_id)}")
 
         raw_responses = []

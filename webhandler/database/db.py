@@ -51,22 +51,41 @@ class MeteoDB:
         start_time_utc = start_time.astimezone(timezone.utc)
         end_time_utc = end_time.astimezone(timezone.utc)
 
-        query = self.session.query(models.Measurement).filter(models.Station.external_id == station_id, models.Measurement.datetime.between(start_time_utc, end_time_utc))
+        query = (
+            self.session.query(
+                models.Measurement.datetime.label("datetime"),
+                models.Measurement.value.label("value"),
+                models.Station.external_id.label("station_id"),
+                models.Variable.name.label("variable"),
+            )
+            .join(models.Station, models.Measurement.station_id == models.Station.id)
+            .join(models.Variable, models.Measurement.variable_id == models.Variable.id)
+            .filter(
+                models.Station.external_id == station_id,
+                models.Measurement.datetime.between(start_time_utc, end_time_utc)
+            )
+        )
 
         if variables is not None:
-            query = query.filter(models.Measurement.variable_id.in_([v.id for v in self.query_variable(name=variables)]))
+            query = query.filter(
+                models.Measurement.variable_id.in_(
+                    [v.id for v in self.query_variable(name=variables)]
+                )
+            )
 
-        df = pd.read_sql_query(sql = query.statement, con = self.engine)
+        df = pd.read_sql_query(sql=query.statement, con=self.engine)
 
         if not df.empty:
             try:
-                df.set_index('datetime', inplace = True)
-                df.index = df.index.dt.tz_localite(timezone.utc).tz_convert(orig_timezone)
+                df['datetime'] = df['datetime'].dt.tz_localize(timezone.utc).dt.tz_convert(orig_timezone)
             except Exception as e:
                 logger.warning(f"Could not convert timezone back to {orig_timezone}: {e}. Keeping UTC timezone.")
                 # Ensure index is UTC-aware if conversion fails
-                if df.index.tz is None:
-                    df.index = df.index.tz_localize('UTC')
+                if df['datetime'].tz is None:
+                    df['datetime'] = df['datetime'].tz_localize('UTC')
+
+            df = df.pivot(columns = 'variable', values = 'value', index = ['station_id', 'datetime'])
+            df.reset_index(level = 0, inplace = True)
 
         return df
 
@@ -80,20 +99,21 @@ class MeteoDB:
             return existing_station[0]
 
         #Fetch station information
+        station_info = None
         if not self.provider_manager_initialized:
             logger.info("ProviderManager is not initialized. Cannot fetch station info")
+        elif self.provider_manager.get_provider(provider.lower()) is None:
+            logger.warning(f"Provider handler for provider '{provider}' could not be found. Station metadata will not be fetched. Available providers: {self.provider_manager.list_providers()}")
         else:
             try:
-                provider_handler = self.provider_manager.get_provider(provider.lower())
-
-                if provider_handler is None:
-                    raise ValueError(f"Provider handler for provider '{provider}' could not be found. Available providers: {self.provider_manager.list_providers()}")
-
-                station_info = provider_handler.get_station_info(external_id)
-                station_info.update(**kwargs)
+                with self.provider_manager.get_provider(provider.lower()) as provider_handler:
+                    station_info = provider_handler.get_station_info(external_id)
+                    station_info.update(**kwargs)
             except Exception as e:
                 logger.error(f"Error fetching station information: {e}")
-                station_info = kwargs
+
+        if station_info is None:
+            station_info = kwargs
 
         try:
             new_station = models.Station(provider = provider, external_id = external_id, **station_info)

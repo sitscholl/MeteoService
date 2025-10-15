@@ -1,7 +1,7 @@
 import pandas as pd
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional, Tuple, Any
 
 from webhandler.database.db import MeteoDB
@@ -24,7 +24,7 @@ class QueryManager:
         logger.info("Provider manager added to QueryManager.")
     
     def _find_data_gaps(self, existing_data: pd.DataFrame, start_time: datetime,
-                        end_time: datetime) -> List[Tuple[datetime, datetime]]:
+                        end_time: datetime, inclusive = 'right') -> List[Tuple[datetime, datetime]]:
         """Find gaps in the database data for the requested time range."""
         try:
             if existing_data.empty:
@@ -44,7 +44,11 @@ class QueryManager:
                 else:
                     existing_data_tz_converted = existing_data
 
-                complete_ts = pd.date_range(start=start_time, end=end_time, freq=freq)
+                # Align start and end dates with timeseries
+                start_time_aligned = pd.Timestamp(start_time).floor(freq)
+                end_time_aligned = pd.Timestamp(end_time).ceil(freq)
+
+                complete_ts = pd.date_range(start=start_time_aligned, end=end_time_aligned, freq=freq, inclusive = inclusive)
                 missing_ts = [ts for ts in complete_ts if ts not in existing_data_tz_converted.index]
                 gaps = derive_datetime_gaps(missing_ts, freq = freq)
                 return gaps
@@ -136,12 +140,16 @@ class QueryManager:
         if not isinstance(station_id, str):
             station_id = str(station_id)
 
+        orig_timezone = start_time.tzinfo
+        start_time_utc = start_time.astimezone(timezone.utc)
+        end_time_utc = end_time.astimezone(timezone.utc)
+
         # First, get existing data from database
         existing_data = db.query_data(
             provider=provider,
             station_id=station_id,
-            start_time=start_time,
-            end_time=end_time,
+            start_time=start_time_utc,
+            end_time=end_time_utc,
             variables=variables
         )
         
@@ -150,7 +158,7 @@ class QueryManager:
             return existing_data
                 
         # Find gaps in the data
-        gaps = self._find_data_gaps(existing_data, start_time, end_time)
+        gaps = self._find_data_gaps(existing_data, start_time_utc, end_time_utc)
         
         if not gaps:
             logger.info("No data gaps found")
@@ -168,8 +176,8 @@ class QueryManager:
                 complete_data = db.query_data(
                     provider=provider,
                     station_id=station_id,
-                    start_time=start_time,
-                    end_time=end_time,
+                    start_time=start_time_utc,
+                    end_time=end_time_utc,
                     variables=variables
                 )
                 return complete_data

@@ -14,10 +14,10 @@ logging.config.dictConfig(config['logging'])
 logger = logging.getLogger(__name__)
 
 tz = pytz.timezone("Europe/Rome")
-provider_query = 'SBR'
+provider_query = 'province'
 query_start = datetime(2025,8,25, tzinfo = tz)
 query_end = datetime(2025,8,26, tzinfo = tz)
-station = 103
+station = "56900MS" #103
 variables = None
 
 meteo_db = MeteoDB()
