@@ -5,9 +5,12 @@ import requests
 import pytz
 import time
 from typing import Dict, Any
+import logging
 
 from webhandler.meteo.base import BaseMeteoHandler
 from webhandler.utils import split_dates
+
+logger = logging.getLogger(__name__)
 
 PROVINCE_RENAME = {
     "DATE": "datetime",
@@ -144,6 +147,9 @@ class ProvinceMeteo(BaseMeteoHandler):
         df_pivot['datetime'] = df_pivot['datetime'].map(lambda x: x.replace('CEST', '').replace('CET', ''))
         df_pivot['datetime'] = pd.to_datetime(df_pivot['datetime'], format = "%Y-%m-%dT%H:%M:%S")
         df_pivot['datetime'] = df_pivot['datetime'].dt.tz_localize(self.timezone).dt.tz_convert('UTC')
+
+        # Sensors are available in different frequencies. Resample to 15min to have a single frequency for all
+        df_pivot = df_pivot.groupby('station_id').resample("15min", on = 'datetime').mean().reset_index()
 
         return df_pivot
 
