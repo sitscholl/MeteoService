@@ -52,20 +52,28 @@ class MeteoDB:
                 models.Measurement.value.label("value"),
                 models.Station.external_id.label("station_id"),
                 models.Variable.name.label("variable"),
+                models.Station.provider.label("provider"),
             )
             .join(models.Station, models.Measurement.station_id == models.Station.id)
             .join(models.Variable, models.Measurement.variable_id == models.Variable.id)
             .filter(
+                models.Station.provider == provider,
                 models.Station.external_id == station_id,
                 models.Measurement.datetime.between(start_time_utc, end_time_utc)
             )
         )
 
         if variables is not None:
+            variables_ids = []
+            for v in variables:
+                variable_model = self.query_variable(v)
+                if not variable_model:
+                    logger.warning(f"Variable {v} not found in database")
+                    continue
+                variables_ids.append(variable_model[0].id)
+
             query = query.filter(
-                models.Measurement.variable_id.in_(
-                    [v.id for v in self.query_variable(name=variables)]
-                )
+                models.Measurement.variable_id.in_(variables_ids)
             )
 
         df = pd.read_sql_query(sql=query.statement, con=self.engine)
