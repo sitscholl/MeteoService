@@ -130,7 +130,7 @@ class QueryManager:
         #Filtering by variables needs more sophisticated data-gap check
         #(i.e. needs to check data-gaps for each variable separately)
         if variables is not None:
-            raise NotImplementedError(f"Filtering by variables in get_data not implemented yet.")
+            raise NotImplementedError("Filtering by variables in get_data not implemented yet.")
 
         # Validate timezone awareness
         if start_time.tzinfo is None:
@@ -153,16 +153,13 @@ class QueryManager:
             end_time=end_time_utc,
             variables=variables
         )
-        
-        # Check if auto-fetch is enabled
-        if not self.config.get('settings', {}).get('auto_fetch_missing_data', True):
-            return existing_data
-                
+                        
         # Find gaps in the data
         gaps = self._find_data_gaps(existing_data, start_time_utc, end_time_utc)
         
         if not gaps:
             logger.info("No data gaps found")
+            existing_data.index = existing_data.index.tz_convert(orig_timezone)
             return existing_data
         
         # Fetch missing data
@@ -181,13 +178,19 @@ class QueryManager:
                     end_time=end_time_utc,
                     variables=variables
                 )
+                complete_data.index = complete_data.index.tz_convert(orig_timezone)
                 return complete_data
                 
             except Exception as e:
                 logger.error(f"Error saving new data to database: {e}")
                 # Return combination of existing and new data
                 if not existing_data.empty:
-                    return pd.concat([existing_data, new_data], ignore_index=True)
+                    combined_data = pd.concat([existing_data, new_data])
+                    combined_data.index = combined_data.index.tz_convert(orig_timezone)
+                    return combined_data
+
+                new_data.index = new_data.index.tz_convert(orig_timezone)
                 return new_data
         
+        existing_data.index = existing_data.index.tz_convert(orig_timezone)
         return existing_data
