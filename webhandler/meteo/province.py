@@ -47,6 +47,10 @@ class ProvinceMeteo(BaseMeteoHandler):
     def __exit__(self, exc_type, exc_value, traceback):
         pass
 
+    @property
+    def freq(self):
+        return "10min"
+
     def get_sensors_for_station(self, station_code: str):
         if self.station_sensors.get(station_code) is not None:
             return self.station_sensors.get(station_code)
@@ -148,8 +152,8 @@ class ProvinceMeteo(BaseMeteoHandler):
         df_pivot['datetime'] = pd.to_datetime(df_pivot['datetime'], format = "%Y-%m-%dT%H:%M:%S")
         df_pivot['datetime'] = df_pivot['datetime'].dt.tz_localize(self.timezone).dt.tz_convert('UTC')
 
-        # Sensors are available in different frequencies. Resample to 15min to have a single frequency for all
-        df_pivot = df_pivot.groupby('station_id').resample("15min", on = 'datetime').mean().reset_index()
+        # Precipitation is available in 5min freq while all others are in 10min freq. Drop additional timestamps for precipitation
+        df_pivot = df_pivot.dropna(subset = [i for i in df_pivot.columns if i not in ['datetime', 'station_id', 'precipitation']], how = 'all')
 
         return df_pivot
 

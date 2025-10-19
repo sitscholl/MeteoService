@@ -69,6 +69,10 @@ class SBRMeteo(BaseMeteoHandler):
         self.close_session()
 
     @property
+    def freq(self):
+        return "5min"
+
+    @property
     def session(self):
         """
         Manages the session with the SBR website, handling login if necessary.

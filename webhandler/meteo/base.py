@@ -11,6 +11,12 @@ class BaseMeteoHandler(ABC):
     meteorological data from various sources.
     """
 
+    @property
+    @abstractmethod
+    def freq(self):
+        """Return frequency string for datetime frequency of provider measurements"""
+        pass
+
     @abstractmethod
     def __enter__(self):
         """Enter context management."""
