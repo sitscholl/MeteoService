@@ -2,8 +2,5 @@
   "provider": "SBR",
   "start_time": "2025-08-25T10:30:00",
   "end_time": "2025-08-25T14:30:00",
-  "tags": {
-    "station_id": "103"
-  },
-  "fields": ["tair_2m", "precipitation"]
+  "station_id": "103"
 }
