@@ -127,6 +127,11 @@ class QueryManager:
             Complete dataset combining database and newly fetched data
         """
 
+        #Filtering by variables needs more sophisticated data-gap check
+        #(i.e. needs to check data-gaps for each variable separately)
+        if variables is not None:
+            raise NotImplementedError(f"Filtering by variables in get_data not implemented yet.")
+
         # Validate timezone awareness
         if start_time.tzinfo is None:
             raise ValueError("start_time must be timezone-aware")
