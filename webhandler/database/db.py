@@ -13,16 +13,11 @@ logger = logging.getLogger(__name__)
 
 class MeteoDB:
 
-    def __init__(self, engine: str = 'sqlite:///database.db'):
+    def __init__(self, engine: str = 'sqlite:///database.db', provider_manager: ProviderManager = None):
         self.engine = create_engine(engine)
         models.Base.metadata.create_all(self.engine)
         self.session = sessionmaker(bind=self.engine, autocommit = False, autoflush = False)()
-        self.provider_manager_initialized = False
-
-    def initialize_provider_manager(self, provider_manager: ProviderManager):
         self.provider_manager = provider_manager
-        self.provider_manager_initialized = True
-        logger.info("Provider manager initialized successfully.")
 
     def query_station(self, provider: str | None = None, external_id: str | None = None):
         query = self.session.query(models.Station)
@@ -100,7 +95,7 @@ class MeteoDB:
 
         #Fetch station information
         station_info = None
-        if not self.provider_manager_initialized:
+        if self.provider_manager is None:
             logger.info("ProviderManager is not initialized. Cannot fetch station info")
         elif self.provider_manager.get_provider(provider.lower()) is None:
             logger.warning(f"Provider handler for provider '{provider}' could not be found. Station metadata will not be fetched. Available providers: {self.provider_manager.list_providers()}")

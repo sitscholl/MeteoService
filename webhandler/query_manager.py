@@ -13,16 +13,11 @@ logger = logging.getLogger(__name__)
 class QueryManager:
     """Orchestrates data fetching from database and external providers."""
     
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], provider_manager: ProviderManager = None):
         """Initialize DataManager with configuration."""
         self.config = config
-        self.provider_manager_initialized = False
-    
-    def initialize_provider_manager(self, provider_manager: ProviderManager):
         self.provider_manager = provider_manager
-        self.provider_manager_initialized = True
-        logger.info("Provider manager added to QueryManager.")
-    
+        
     def _find_data_gaps(self, existing_data: pd.DataFrame, start_time: datetime,
                         end_time: datetime, inclusive = 'right') -> List[Tuple[datetime, datetime]]:
         """Find gaps in the database data for the requested time range."""
@@ -140,6 +135,7 @@ class QueryManager:
         if not isinstance(station_id, str):
             station_id = str(station_id)
 
+        #Round to nearest hour to avoid inconsistencies between providers and data gaps
         orig_timezone = start_time.tzinfo
         start_time_utc = start_time.astimezone(timezone.utc)
         end_time_utc = end_time.astimezone(timezone.utc)
