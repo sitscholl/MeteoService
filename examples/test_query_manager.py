@@ -13,10 +13,10 @@ config = load_config("config/config.yaml")
 logging.config.dictConfig(config['logging'])
 logger = logging.getLogger(__name__)
 
-tz = pytz.timezone("Europe/Rome")
+tz = pytz.timezone("utc")
 provider_query = 'SBR'
 query_start = datetime(2025,8,25, tzinfo = tz)
-query_end = datetime(2025,8,26, tzinfo = tz)
+query_end = datetime(2025,8,26,23,59,59, tzinfo = tz)
 station = 103 #"56900MS" #
 variables = None
 
