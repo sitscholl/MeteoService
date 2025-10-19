@@ -1,4 +1,5 @@
 import pandas as pd
+from pandas.tseries.frequencies import to_offset
 
 import logging
 from datetime import datetime, timezone
@@ -17,20 +18,19 @@ class QueryManager:
         """Initialize DataManager with configuration."""
         self.config = config
         self.provider_manager = provider_manager
+
         
     def _find_data_gaps(self, existing_data: pd.DataFrame, start_time: datetime,
-                        end_time: datetime, inclusive = 'right') -> List[Tuple[datetime, datetime]]:
+                        end_time: datetime, freq: str, inclusive = 'right', min_gap_duration: str = '30min') -> List[Tuple[datetime, datetime]]:
         """Find gaps in the database data for the requested time range."""
         try:
+            min_gap_duration = pd.Timedelta(min_gap_duration)
+
             if existing_data.empty:
                 # No data exists, entire range is a gap
                 return [(start_time, end_time)]
 
             try:
-                freq = pd.infer_freq(existing_data.index)
-                if freq is None:
-                    raise ValueError(f"Frequency cannot be determined for a series of len {len(existing_data)}")
-
                 # Ensure timezone consistency between input times and existing data
                 if existing_data.index.tz != start_time.tzinfo:
                     # Convert existing data index to match input timezone
@@ -45,7 +45,10 @@ class QueryManager:
 
                 complete_ts = pd.date_range(start=start_time_aligned, end=end_time_aligned, freq=freq, inclusive = inclusive)
                 missing_ts = [ts for ts in complete_ts if ts not in existing_data_tz_converted.index]
+
                 gaps = derive_datetime_gaps(missing_ts, freq = freq)
+                gaps = [(s, e) for s, e in gaps if (e - s) >= min_gap_duration]
+                
                 return gaps
             except Exception as e:
                 logger.warning(f'Unable to determine timeseries gaps: {e}')
@@ -137,13 +140,16 @@ class QueryManager:
             raise ValueError("start_time must be timezone-aware")
         if end_time.tzinfo is None:
             raise ValueError("end_time must be timezone-aware")
+        logger.debug(f"Querying data starting from {start_time} with tz {start_time.tzinfo} to {end_time} with tz {end_time.tzinfo}")
+
         if not isinstance(station_id, str):
             station_id = str(station_id)
 
         #Round to nearest hour to avoid inconsistencies between providers and data gaps
         orig_timezone = start_time.tzinfo
-        start_time_utc = start_time.astimezone(timezone.utc)
-        end_time_utc = end_time.astimezone(timezone.utc)
+        provider_freq = self.provider_manager.get_provider(provider.lower()).freq
+        start_time_utc = pd.Timestamp( start_time.astimezone(timezone.utc) ).floor(provider_freq)
+        end_time_utc = pd.Timestamp( end_time.astimezone(timezone.utc) ).ceil(provider_freq)
 
         # First, get existing data from database
         existing_data = db.query_data(
@@ -155,7 +161,7 @@ class QueryManager:
         )
                         
         # Find gaps in the data
-        gaps = self._find_data_gaps(existing_data, start_time_utc, end_time_utc)
+        gaps = self._find_data_gaps(existing_data, start_time_utc, end_time_utc, freq = provider_freq)
         
         if not gaps:
             logger.info("No data gaps found")
