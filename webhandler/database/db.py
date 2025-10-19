@@ -4,7 +4,6 @@ import pandas as pd
 
 import logging
 from datetime import datetime, timezone
-import pytz
 
 from . import models
 from ..provider_manager import ProviderManager
@@ -18,6 +17,10 @@ class MeteoDB:
         models.Base.metadata.create_all(self.engine)
         self.session = sessionmaker(bind=self.engine, autocommit = False, autoflush = False)()
         self.provider_manager = provider_manager
+
+    def get_providers(self):
+        query = self.session.query(models.Station.provider.distinct())
+        return query.all()
 
     def query_station(self, provider: str | None = None, external_id: str | None = None):
         query = self.session.query(models.Station)
