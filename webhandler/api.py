@@ -12,7 +12,7 @@ import pytz
 import logging
 
 from webhandler.config import load_config
-from webhandler.db import MeteoDB
+from webhandler.database.db import MeteoDB
 from webhandler.query_manager import QueryManager
 from webhandler.provider_manager import ProviderManager
 
@@ -35,8 +35,7 @@ app = FastAPI(
 provider_manager = ProviderManager(config['providers'])
 
 # Initialize QueryManager
-query_manager = QueryManager(config)
-query_manager.initialize_provider_manager(provider_manager)
+query_manager = QueryManager(config, provider_manager = provider_manager)
 
 # Database dependency with proper context management
 async def get_db():
@@ -44,15 +43,8 @@ async def get_db():
     Dependency to get database instance with proper connection management.
     Uses async context manager to ensure database is properly connected and disconnected.
     """
-    db = MeteoDB(config.get('database', {}).get('path', 'db/db.csv'))
-    db.initialize_provider_manager(provider_manager)
-    try:
-        # Enter the context manager to connect to the database
-        db.__enter__()
-        yield db
-    finally:
-        # Ensure database is properly disconnected
-        db.__exit__(None, None, None)
+    db = MeteoDB(config.get('database', {}).get('path', 'sqlite:///database.db'), provider_manager=provider_manager)
+    return db
 
 def get_query_manager() -> QueryManager:
     """Dependency to get data manager instance."""
@@ -63,8 +55,8 @@ class TimeseriesQuery(BaseModel):
     provider: str = Field(..., description="Provider name (e.g., 'SBR')")
     start_time: datetime = Field(..., description="Start time (ISO format with timezone, e.g., '2025-01-15T10:30:00+01:00')")
     end_time: datetime = Field(..., description="End time (ISO format with timezone, e.g., '2025-01-15T10:30:00+01:00')")
-    tags: Optional[Dict[str, str]] = Field(None, description="Filter tags")
-    fields: Optional[List[str]] = Field(None, description="Specific fields to return")
+    station_id: str = Field(..., description="External id of the station to return")
+    variables: Optional[List[str]] = Field(None, description="Specific variables to return")
     timezone: Optional[str] = Field(None, description="Timezone for naive datetimes (e.g., 'Europe/Rome'). Only used if start_time/end_time are timezone-naive.")
 
     @field_validator('start_time', 'end_time', mode='before')
@@ -138,10 +130,10 @@ async def root():
 async def health_check(db: MeteoDB = Depends(get_db)):
     """Health check endpoint."""
     try:
-        providers = db.get_providers()
+        stations = db.query_station()
         return {
             "status": "healthy",
-            "providers_count": len(providers),
+            "station_count": len(stations),
             "timestamp": datetime.now(pytz.timezone(DEFAULT_TIMEZONE))
         }
     except Exception as e:
@@ -157,22 +149,22 @@ async def get_providers(db: MeteoDB = Depends(get_db)):
         logger.error(f"Failed to get providers: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve providers")
 
-@app.get("/providers/{provider}/tags")
-async def get_provider_tags(
+@app.get("/providers/{provider}/stations")
+async def get_provider_stations(
     provider: str,
     db: MeteoDB = Depends(get_db)
 ):
-    """Get available tags for a specific provider."""
+    """Get available stations for a specific provider."""
     try:
-        tags = db.get_tags_for_provider(provider)
-        if not tags:
-            raise HTTPException(status_code=404, detail=f"provider '{provider}' not found")
-        return tags
+        provider_stations = db.query_station(provider = provider)
+        if not provider_stations:
+            raise HTTPException(status_code=404, detail=f"No stations for provider '{provider}' found")
+        return provider_stations
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get tags for {provider}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve tags")
+        logger.error(f"Failed to get stations for {provider}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve stations")
 
 # @app.get("/providers/{provider}/time-range")
 # async def get_provider_time_range(
@@ -229,10 +221,10 @@ async def query_timeseries(
         df = query_manager.get_data(
             db=db,
             provider=query.provider,
+            station_id = query.station_id,
             start_time=query.start_time,
             end_time=query.end_time,
-            tags=query.tags,
-            fields=query.fields
+            variables=query.variables
         )
 
         if df.empty:
@@ -245,8 +237,8 @@ async def query_timeseries(
                 },
                 metadata={
                     "provider": query.provider,
-                    "tags": query.tags,
-                    "fields": query.fields,
+                    "station": query.station_id,
+                    "variables": query.variables,
                     "timezone_used": str(query.start_time.tzinfo)
                 }
             )
@@ -273,8 +265,8 @@ async def query_timeseries(
             },
             metadata={
                 "provider": query.provider,
-                "tags": query.tags,
-                "fields": list(df.columns),
+                "station": query.station_id,
+                "variables": list(df.columns),
                 "data_types": {col: str(dtype) for col, dtype in df.dtypes.items()},
                 "query_timezone": str(query.start_time.tzinfo),
                 "result_timezone": str(df.index.tz) if getattr(df.index, "tz", None) is not None else None
@@ -286,42 +278,6 @@ async def query_timeseries(
     except Exception as e:
         logger.error(f"Query failed: {e}")
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
-
-@app.get("/stats", response_model=DatabaseStats)
-async def get_database_stats(db: MeteoDB = Depends(get_db)):
-    """Get overall database statistics."""
-    try:
-        providers = db.get_providers()
-
-        # Get time ranges for each provider
-        time_ranges = {}
-        total_points = 0
-
-        for provider in providers:
-            time_range = db.get_time_range(provider)
-            if time_range:
-                time_ranges[provider] = {
-                    "start": time_range[0],
-                    "end": time_range[1]
-                }
-
-                # Rough estimate of points (this could be expensive for large datasets)
-                # In production, you might want to cache this or compute it differently
-                try:
-                    df = db.query_data(provider, time_range[0], time_range[1])
-                    total_points += len(df)
-                except:
-                    pass  # Skip if query fails
-
-        return DatabaseStats(
-            providers=providers,
-            total_points=total_points,
-            time_ranges=time_ranges
-        )
-
-    except Exception as e:
-        logger.error(f"Failed to get database stats: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve database statistics")
 
 # Error handlers
 @app.exception_handler(ValueError)
