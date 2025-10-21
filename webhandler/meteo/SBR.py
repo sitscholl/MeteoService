@@ -182,7 +182,7 @@ class SBRMeteo(BaseMeteoHandler):
             List[str]: List of raw HTML response texts from the website
         """
 
-        if str(station_id) not in self.get_station_info(station_id).keys():
+        if str(station_id) not in self.get_station_codes():
             raise ValueError(f"Invalid station_id {station_id}. Choose one from {self.get_station_codes()}")
 
         # Validate timezone awareness
