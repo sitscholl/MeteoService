@@ -145,6 +145,18 @@ class SBRMeteo(BaseMeteoHandler):
             'name': station_props.get('st_name')
         }
 
+    def get_station_codes(self):
+        
+        station_info_file = Path(self.stations_url)
+        if not station_info_file.exists():
+            logger.warning(f"File {station_info_file} does not exist. Cannot query station codes.")
+            return []
+
+        with station_info_file.open("r", encoding="utf-8") as file:
+            response_data = json.load(file)
+
+        return [i['properties']['st_id'] for i in response_data['features']]
+
     def get_data(
             self,
             station_id: str | int,
@@ -169,6 +181,9 @@ class SBRMeteo(BaseMeteoHandler):
         Returns:
             List[str]: List of raw HTML response texts from the website
         """
+
+        if str(station_id) not in self.get_station_info(station_id).keys():
+            raise ValueError(f"Invalid station_id {station_id}. Choose one from {self.get_station_codes()}")
 
         # Validate timezone awareness
         if start.tzinfo is None:
