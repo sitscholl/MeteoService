@@ -102,7 +102,7 @@ def main():
     
     # Test examples
     examples = [
-        # ("Timezone-aware datetimes", "query_timezone_aware.json"),
+        ("Timezone-aware datetimes", "query_timezone_aware.json"),
         ("UTC timezone", "query_utc.json"),
         ("Naive with timezone parameter", "query_naive_with_timezone.json"),
         ("Naive with default timezone", "query_naive_default_timezone.json")
