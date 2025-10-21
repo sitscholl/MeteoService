@@ -140,7 +140,6 @@ class QueryManager:
             raise ValueError("start_time must be timezone-aware")
         if end_time.tzinfo is None:
             raise ValueError("end_time must be timezone-aware")
-        logger.debug(f"Querying data starting from {start_time} with tz {start_time.tzinfo} to {end_time} with tz {end_time.tzinfo}")
 
         if not isinstance(station_id, str):
             station_id = str(station_id)
@@ -150,6 +149,8 @@ class QueryManager:
         provider_freq = self.provider_manager.get_provider(provider.lower()).freq
         start_time_utc = pd.Timestamp( start_time.astimezone(timezone.utc) ).floor(provider_freq)
         end_time_utc = pd.Timestamp( end_time.astimezone(timezone.utc) ).ceil(provider_freq)
+
+        logger.debug(f"Querying data from {start_time_utc} to {end_time_utc} with frequency {provider_freq}")
 
         # First, get existing data from database
         existing_data = db.query_data(
@@ -165,8 +166,12 @@ class QueryManager:
         
         if not gaps:
             logger.info("No data gaps found")
-            existing_data.index = existing_data.index.tz_convert(orig_timezone)
+            if not existing_data.empty:
+                existing_data.index = existing_data.index.tz_convert(orig_timezone)
             return existing_data
+        else:
+            for (start_gap, end_gap) in gaps:
+                logger.debug(f"Data gap found: {start_gap} - {end_gap}")
         
         # Fetch missing data
         new_data = self._fetch_missing_data(provider, station_id, gaps)
@@ -198,5 +203,6 @@ class QueryManager:
                 new_data.index = new_data.index.tz_convert(orig_timezone)
                 return new_data
         
-        existing_data.index = existing_data.index.tz_convert(orig_timezone)
+        if not existing_data.empty:
+            existing_data.index = existing_data.index.tz_convert(orig_timezone)
         return existing_data
