@@ -49,9 +49,6 @@ docker-compose.yml
 # Documentation
 README.md
 
-# Lock files (we use requirements.txt instead)
-uv.lock
-
 # Logs
 *.log
 

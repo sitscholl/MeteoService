@@ -1,9 +1,9 @@
 # Use Python 3.13 slim image as base
 FROM ghcr.io/astral-sh/uv:python3.13-trixie-slim
 
-# Setup a non-root user
-RUN groupadd --system --gid 999 nonroot \
- && useradd --system --gid 999 --uid 999 --create-home nonroot
+# # Setup a non-root user
+# RUN groupadd --system --gid 999 nonroot \
+#  && useradd --system --gid 999 --uid 999 --create-home nonroot
 
 # Install the project into `/app`
 WORKDIR /app
@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
+RUN uv pip install "pandera[pandas]"
 
 # Create config directory if it doesn't exist
 RUN mkdir -p /app/config
@@ -42,10 +43,10 @@ ENV PATH="/app/.venv/bin:$PATH"
 ENTRYPOINT []
 
 # Use the non-root user to run our application
-USER nonroot
+# USER nonroot
 
 # Health check
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
+HEALTHCHECK CMD curl -f http://localhost:8000/health
 
 # Run app
 CMD ["uv", "run", "main.py"]
