@@ -44,7 +44,10 @@ async def get_db():
     Uses async context manager to ensure database is properly connected and disconnected.
     """
     db = MeteoDB(config.get('database', {}).get('path', 'sqlite:///database.db'), provider_manager=provider_manager)
-    return db
+    try:
+        yield db
+    finally:
+        await db.close()
 
 def get_query_manager() -> QueryManager:
     """Dependency to get data manager instance."""
