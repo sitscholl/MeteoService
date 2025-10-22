@@ -160,6 +160,9 @@ class QueryManager:
             end_time=end_time_utc,
             variables=variables
         )
+
+        if not existing_data.empty:
+            logger.debug(f"Found existing data ranging from {existing_data.index.min()} to {existing_data.index.max()}")
                         
         # Find gaps in the data
         gaps = self._find_data_gaps(existing_data, start_time_utc, end_time_utc, freq = provider_freq)
