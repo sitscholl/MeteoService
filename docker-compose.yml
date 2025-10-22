@@ -9,6 +9,7 @@ services:
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
+      - TZ=Europe/Rome
     restart: unless-stopped
     container_name: meteo-service
     healthcheck:
