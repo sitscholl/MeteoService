@@ -54,7 +54,7 @@ class ProviderManager:
                     module = importlib.import_module(f'{meteo_package}.{module_name}')
                     self._register_providers_from_module(module)
                 except ImportError as e:
-                    print(f"Warning: Could not import module {module_name}: {e}")
+                    logger.warning(f"Warning: Could not import module {module_name}: {e}")
     
     def _register_providers_from_module(self, module):
         """

@@ -31,9 +31,11 @@ class QueryManager:
                 return [(start_time, end_time)]
 
             try:
-                # Ensure timezone consistency between input times and existing data
-                if existing_data.index.tz != start_time.tzinfo:
-                    # Convert existing data index to match input timezone
+                 # Ensure timezone consistency between input times and existing data
+                if existing_data.index.tz is None:
+                    existing_data_tz_converted = existing_data.copy()
+                    existing_data_tz_converted.index = existing_data_tz_converted.index.tz_localize('UTC').tz_convert(start_time.tzinfo)
+                elif existing_data.index.tz != start_time.tzinfo:
                     existing_data_tz_converted = existing_data.copy()
                     existing_data_tz_converted.index = existing_data_tz_converted.index.tz_convert(start_time.tzinfo)
                 else:
@@ -104,7 +106,7 @@ class QueryManager:
             return pd.DataFrame()
         
         if all_data:
-            return pd.concat(all_data, ignore_index=True)
+            return pd.concat(all_data)
         return pd.DataFrame()
     
     def get_data(
