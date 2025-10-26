@@ -225,6 +225,24 @@ class MeteoDB:
                 except Exception as e:
                     self.session.rollback()
                     logger.error(f"Error inserting data for station {st_id} and variable {var}: {e}")
+                    
+    def close(self):
+        """
+        Close the SQLAlchemy session and dispose of the engine connection pool.
+        """
+        try:
+            if self.session:
+                self.session.close()
+                logger.debug("Database session closed.")
+        except Exception as e:
+            logger.warning(f"Error closing database session: {e}")
+
+        try:
+            if self.engine:
+                self.engine.dispose()
+                logger.debug("Database engine disposed.")
+        except Exception as e:
+            logger.warning(f"Error disposing database engine: {e}")
 
 
 if __name__ == "__main__":

@@ -47,7 +47,7 @@ async def get_db():
     try:
         yield db
     finally:
-        await db.close()
+        db.close()
 
 def get_query_manager() -> QueryManager:
     """Dependency to get data manager instance."""
@@ -169,117 +169,120 @@ async def get_provider_stations(
         logger.error(f"Failed to get stations for {provider}: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve stations")
 
-# @app.get("/providers/{provider}/time-range")
-# async def get_provider_time_range(
-#     provider: str,
-#     station_id: Optional[str] = Query(None, description="Filter by station ID"),
-#     db: MeteoDB = Depends(get_db)
-# ):
-#     """Get time range for a provider, optionally filtered by station."""
-#     try:
-#         tags = {"station_id": station_id} if station_id else None
-#         time_range = db.get_time_range(provider, tags)
-#
-#         if not time_range:
-#             raise HTTPException(
-#                 status_code=404,
-#                 detail=f"No data found for provider '{provider
-#             )
-#
-#         return {
-#             "provider": provider,
-#             "start_time": time_range[0],
-#             "end_time": time_range[1],
-#             "tags": tags
-#         }
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         logger.error(f"Failed to get time range for {provider}: {e}")
-#         raise HTTPException(status_code=500, detail="Failed to retrieve time range")
-
-@app.post("/query", response_model=TimeseriesResponse)
-async def query_timeseries(
+##Endpoints to query data
+#Helper function that is called by query endpoints
+async def _run_timeseries_query(
     query: TimeseriesQuery,
-    db: MeteoDB = Depends(get_db),
-    query_manager: QueryManager = Depends(get_query_manager)
-):
-    """
-    Query timeseries data with flexible filtering and smart data fetching.
+    db: MeteoDB,
+    query_manager: QueryManager
+) -> TimeseriesResponse:
+    if query.start_time >= query.end_time:
+        raise HTTPException(status_code=400, detail="start_time must be before end_time")
 
-    Supports timezone-aware datetime inputs in ISO format:
-    - "2025-01-15T10:30:00+01:00" (with timezone offset)
-    - "2025-01-15T10:30:00Z" (UTC)
-    - "2025-01-15T10:30:00" (naive, uses timezone parameter or default)
-    """
-    try:
-        # Validate time range
-        if query.start_time >= query.end_time:
-            raise HTTPException(
-                status_code=400,
-                detail="start_time must be before end_time"
-            )
+    df = query_manager.get_data(
+        db=db,
+        provider=query.provider,
+        station_id=query.station_id,
+        start_time=query.start_time,
+        end_time=query.end_time,
+        variables=query.variables,
+    )
 
-        # Use QueryManager to get data (includes smart fetching)
-        df = query_manager.get_data(
-            db=db,
-            provider=query.provider,
-            station_id = query.station_id,
-            start_time=query.start_time,
-            end_time=query.end_time,
-            variables=query.variables
-        )
-
-        if df.empty:
-            return TimeseriesResponse(
-                data=[],
-                count=0,
-                time_range={
-                    "start": query.start_time,
-                    "end": query.end_time
-                },
-                metadata={
-                    "provider": query.provider,
-                    "station": query.station_id,
-                    "variables": query.variables,
-                    "timezone_used": str(query.start_time.tzinfo)
-                }
-            )
-
-        # Convert DataFrame to list of dictionaries
-        data = []
-        for timestamp, row in df.iterrows():
-            # Ensure timestamp is serializable (use ISO format when possible)
-            try:
-                ts_val = timestamp.isoformat()
-            except Exception:
-                ts_val = str(timestamp)
-
-            record = {"datetime": ts_val}
-            record.update(row.to_dict())
-            data.append(record)
-
+    if df.empty:
         return TimeseriesResponse(
-            data=data,
-            count=len(data),
-            time_range={
-                "start": df.index.min(),
-                "end": df.index.max()
-            },
+            data=[],
+            count=0,
+            time_range={"start": query.start_time, "end": query.end_time},
             metadata={
                 "provider": query.provider,
                 "station": query.station_id,
-                "variables": list(df.columns),
-                "data_types": {col: str(dtype) for col, dtype in df.dtypes.items()},
-                "query_timezone": str(query.start_time.tzinfo),
-                "result_timezone": str(df.index.tz) if getattr(df.index, "tz", None) is not None else None
-            }
+                "variables": query.variables,
+                "timezone_used": str(query.start_time.tzinfo),
+            },
         )
 
+    data = []
+    for timestamp, row in df.iterrows():
+        try:
+            ts_val = timestamp.isoformat()
+        except Exception:
+            ts_val = str(timestamp)
+        record = {"datetime": ts_val}
+        record.update(row.to_dict())
+        data.append(record)
+
+    return TimeseriesResponse(
+        data=data,
+        count=len(data),
+        time_range={"start": df.index.min(), "end": df.index.max()},
+        metadata={
+            "provider": query.provider,
+            "station": query.station_id,
+            "variables": list(df.columns),
+            "data_types": {col: str(dtype) for col, dtype in df.dtypes.items()},
+            "query_timezone": str(query.start_time.tzinfo),
+            "result_timezone": str(getattr(df.index, "tz", None)),
+        },
+    )
+
+@app.post("/query", response_model=TimeseriesResponse)
+async def query_timeseries(
+        query: TimeseriesQuery,
+        db: MeteoDB = Depends(get_db),
+        query_manager: QueryManager = Depends(get_query_manager),
+    ):
+    try:
+        return await _run_timeseries_query(query, db, query_manager)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Query failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+@app.get("/query", response_model=TimeseriesResponse)
+async def query_timeseries_get(
+        provider: str = Query(..., description="Provider name, e.g., 'SBR'"),
+        station_id: str = Query(..., description="External station id"),
+        start_date: datetime = Query(..., description="ISO datetime; e.g. 2025-01-15T10:30:00Z"),
+        end_date: datetime = Query(..., description="ISO datetime; e.g. 2025-01-15T12:30:00+01:00"),
+        variables: Optional[List[str]] = Query(
+            None,
+            description="Repeat param for multiple, e.g. ?variables=tmp&variables=hum. Also accepts comma-separated.",
+        ),
+        timezone: Optional[str] = Query(
+            None,
+            description="Timezone for naive datetimes, e.g. 'Europe/Rome'. Ignored if start/end include tzinfo.",
+        ),
+        db: MeteoDB = Depends(get_db),
+        query_manager: QueryManager = Depends(get_query_manager),
+    ):
+    # Support comma-separated fallback (besides repeated ?variables=)
+    if variables and len(variables) == 1 and "," in variables[0]:
+        variables = [v.strip() for v in variables[0].split(",") if v.strip()]
+
+    # Reuse your Pydantic validator logic (timezone localization, checks, etc.)
+    try:
+        # Validate timezone value proactively (optional—Pydantic will also catch)
+        if timezone:
+            pytz.timezone(timezone)  # will raise UnknownTimeZoneError if invalid
+
+        q = TimeseriesQuery(
+            provider=provider,
+            station_id=station_id,
+            start_time=start_date,
+            end_time=end_date,
+            variables=variables,
+            timezone=timezone,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        return await _run_timeseries_query(q, db, query_manager)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"GET /query failed: {e}")
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
 # Error handlers
