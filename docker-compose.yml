@@ -1,5 +1,5 @@
 services:
-  workforce-planner:
+  meteo-service:
     image: ghcr.io/sitscholl/meteo-service:latest
     ports:
       - "8000:8000"
