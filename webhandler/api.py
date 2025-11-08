@@ -187,18 +187,29 @@ async def _run_timeseries_query(
         end_time=query.end_time,
         variables=query.variables,
     )
+    station = db.query_station(provider=query.provider, external_id=query.station_id)
+    if not station:
+        station_info = {}
+    else:
+        station = station[0]
+        station_info = {"elevation": station.elevation, 'latitude': station.latitude, 'longitude': station.longitude}
+
+    query_metadata = {
+        "provider": query.provider,
+        "station": query.station_id,
+        "elevation": station_info.get('elevation'),
+        "latitude": station_info.get('latitude'),
+        "longitude": station_info.get('longitude'),
+        "variables": query.variables,
+        "timezone_used": str(query.start_time.tzinfo),
+        }
 
     if df.empty:
         return TimeseriesResponse(
             data=[],
             count=0,
             time_range={"start": query.start_time, "end": query.end_time},
-            metadata={
-                "provider": query.provider,
-                "station": query.station_id,
-                "variables": query.variables,
-                "timezone_used": str(query.start_time.tzinfo),
-            },
+            metadata=query_metadata,
         )
 
     data = []
@@ -211,18 +222,13 @@ async def _run_timeseries_query(
         record.update(row.to_dict())
         data.append(record)
 
+    query_metadata['result_timezone'] = str(getattr(df.index, "tz", None))
+
     return TimeseriesResponse(
         data=data,
         count=len(data),
         time_range={"start": df.index.min(), "end": df.index.max()},
-        metadata={
-            "provider": query.provider,
-            "station": query.station_id,
-            "variables": list(df.columns),
-            "data_types": {col: str(dtype) for col, dtype in df.dtypes.items()},
-            "query_timezone": str(query.start_time.tzinfo),
-            "result_timezone": str(getattr(df.index, "tz", None)),
-        },
+        metadata=query_metadata,
     )
 
 @app.post("/query", response_model=TimeseriesResponse)
