@@ -84,7 +84,7 @@ class QueryManager:
                     gap_days = (end_gap - start_gap).days
                     max_gap_days = self.config.get('settings', {}).get('max_gap_days', 30)
                     
-                    if gap_days > max_gap_days:
+                    if max_gap_days > 0 and gap_days > max_gap_days:
                         logger.warning(f"Gap of {gap_days} days exceeds maximum of {max_gap_days} days. Skipping.")
                         continue
                     
