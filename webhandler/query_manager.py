@@ -83,9 +83,9 @@ class QueryManager:
         station_id: str,
         gaps: List[Tuple[datetime, datetime]],
         freq: str,
-        known_variables: Optional[List[str]] = None
+        all_variables: List[str]
     ) -> pd.DataFrame:
-        """Fetch and align missing data from the specified provider."""
+        """Fetch and align missing data from the specified provider. Also makes sure that missing timestamps are included by filling with NA"""
         if not gaps:
             return pd.DataFrame()
         
@@ -98,13 +98,7 @@ class QueryManager:
             logger.info(f"No provider available for provider: {provider_name}. Missing data cannot be requested.")
             return pd.DataFrame()
 
-        schema_variables = known_variables or [
-            col for col in getattr(provider, 'output_schema', None).columns.keys()
-            if col not in {'datetime', 'station_id'}
-        ]
-
         all_data: list[pd.DataFrame] = []
-        freq_offset = to_offset(freq)
 
         try:
             with provider:
@@ -127,47 +121,41 @@ class QueryManager:
                         continue
                     
                     logger.info(f"Fetching data from {provider_name} for {start_gap} to {end_gap}")
+
+                    provider_inclusion = provider.inclusive
+                    if provider_inclusion == 'left':
+                        end_gap = end_gap + pd.Timedelta(freq)
+                    if provider_inclusion == 'right':
+                        start_gap = start_gap - pd.Timedelta(freq)
                     
                     provider_data = provider.run(
                         start=start_gap,
-                        end=end_gap + pd.Timedelta(freq_offset),
+                        end=end_gap,
                         data_type='meteo',
                         station_id=station_id
                     )
 
                     if provider_data.empty:
                         logger.debug(f"No data returned for {start_gap} - {end_gap}")
-                        if schema_variables:
+                        if all_variables:
                             placeholder = pd.DataFrame({
                                 'datetime': gap_index,
                                 'station_id': station_id
                             })
-                            for column in schema_variables:
+                            for column in all_variables:
                                 placeholder[column] = pd.NA
                             all_data.append(placeholder)
                         continue
 
-                    provider_data = provider_data.copy()
-                    provider_data['station_id'] = provider_data['station_id'].astype(str)
-                    provider_data = provider_data[provider_data['station_id'] == station_id]
-
-                    if provider_data.empty:
-                        continue
-
-                    provider_data['datetime'] = pd.to_datetime(provider_data['datetime'])
-                    if provider_data['datetime'].dt.tz is None:
-                        provider_data['datetime'] = provider_data['datetime'].dt.tz_localize('UTC')
-                    else:
-                        provider_data['datetime'] = provider_data['datetime'].dt.tz_convert('UTC')
-
-                    provider_data.sort_values('datetime', inplace=True)
-                    provider_data.drop_duplicates(subset=['datetime'], keep='last', inplace=True)
+                    #Add missing timestamps
                     provider_data.set_index('datetime', inplace=True)
-                    provider_data = provider_data.reindex(gap_index)
-                    for column in schema_variables:
+                    provider_data = provider_data.reindex(gap_index) #maybe use a tolerance here that equals freq?
+
+                    #Add missing variables
+                    for column in all_variables:
                         if column not in provider_data.columns:
                             provider_data[column] = pd.NA
-                    provider_data['station_id'] = station_id
+
                     provider_data.reset_index(inplace=True)
                     provider_data.rename(columns={'index': 'datetime'}, inplace=True)
 
@@ -180,7 +168,7 @@ class QueryManager:
         if all_data:
             result = pd.concat(all_data, ignore_index=True)
             result.sort_values('datetime', inplace=True)
-            result.reset_index(drop=True, inplace=True)
+            # result.reset_index(drop=True, inplace=True)
             return result
         return pd.DataFrame()
     
@@ -242,23 +230,11 @@ class QueryManager:
             variables=variables
         )
 
-        existing_data_gaps = existing_data.copy()
-        if not existing_data_gaps.empty:
-            try:
-                if existing_data_gaps.index.tz is None:
-                    existing_data_gaps.index = existing_data_gaps.index.tz_localize(timezone.utc)
-                else:
-                    existing_data_gaps.index = existing_data_gaps.index.tz_convert(timezone.utc)
-                existing_data_gaps = existing_data_gaps[~existing_data_gaps.index.duplicated(keep='last')]
-            except Exception as e:
-                logger.warning(f"Unable to normalize existing data timestamps: {e}")
-                existing_data_gaps = pd.DataFrame()
-
         if not existing_data.empty:
             logger.debug(f"Found existing data ranging from {existing_data.index.min()} to {existing_data.index.max()}")
                         
         # Find gaps in the data
-        gaps = self._find_data_gaps(existing_data_gaps, start_time_utc, end_time_utc, freq = provider_freq)
+        gaps = self._find_data_gaps(existing_data, start_time_utc, end_time_utc, freq = provider_freq)
         
         if not gaps:
             logger.info("No data gaps found")
@@ -270,14 +246,12 @@ class QueryManager:
                 logger.debug(f"Data gap found: {start_gap} - {end_gap}")
         
         # Fetch missing data
-        known_variables = [col for col in existing_data.columns if col not in {'station_id'}]
-
         new_data = self._fetch_missing_data(
             provider_name=provider,
             station_id=station_id,
             gaps=gaps,
             freq=provider_freq,
-            known_variables=known_variables
+            all_variables = [] if existing_data.empty else [i for i in existing_data.columns if i not in {'station_id', 'datetime'}]
         )
         
         if not new_data.empty:
