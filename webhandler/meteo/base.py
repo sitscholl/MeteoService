@@ -17,6 +17,12 @@ class BaseMeteoHandler(ABC):
         """Return frequency string for datetime frequency of provider measurements"""
         pass
 
+    @property
+    @abstractmethod
+    def inclusive(self):
+        """Return string indicating if query calls to the provider are left or right inclusive or both. Must be one of 'left', 'right' or 'both'."""
+        pass
+
     @abstractmethod
     def __enter__(self):
         """Enter context management."""

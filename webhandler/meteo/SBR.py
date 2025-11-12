@@ -373,6 +373,7 @@ class SBRMeteo(BaseMeteoHandler):
                     lambda x: datetime.datetime.fromtimestamp(int(x)) if pd.notna(x) else pd.NaT
                 )
                 tbl['Datum'] = tbl['Datum'].dt.tz_localize(tz=self.timezone).dt.tz_convert('UTC')
+                tbl['Datum'] = tbl['Datum'].dt.floor(self.freq) #set seconds to 0
         except (ValueError, TypeError) as e:
             logger.warning(f"Error converting Datum: {e}")
 
