@@ -73,6 +73,10 @@ class SBRMeteo(BaseMeteoHandler):
         return "5min"
 
     @property
+    def inclusive(self):
+        return 'right'
+
+    @property
     def session(self):
         """
         Manages the session with the SBR website, handling login if necessary.
