@@ -91,8 +91,12 @@ def main():
     global logger
     logger = logging.getLogger(__name__)
 
+    provider_stations_dict = {
+        'province': ["09700MS"],
+        #'SBR': [103, 113]
+    }
     provider_query = "SBR"
-    stations_to_test = config.get("testing", {}).get("stations", [103])
+    stations_to_test = config.get("testing", {}).get("stations", [113])
     stations_to_test = [str(st) for st in stations_to_test]
 
     overlapping_ranges = [
@@ -117,49 +121,50 @@ def main():
     meteo_db = MeteoDB(provider_manager=provider_manager)
     query_manager = QueryManager(config, provider_manager=provider_manager)
 
-    try:
-        run_scenario(
-            scenario_name="overlapping_windows_single_station",
-            stations=stations_to_test[:1],
-            ranges=overlapping_ranges,
-            repetitions=2,
-            manager=query_manager,
-            db=meteo_db,
-            provider=provider_query,
-        )
+    for provider_query, stations_to_test in provider_stations_dict.items():
+        try:
+            run_scenario(
+                scenario_name="overlapping_windows_single_station",
+                stations=stations_to_test[:1],
+                ranges=overlapping_ranges,
+                repetitions=2,
+                manager=query_manager,
+                db=meteo_db,
+                provider=provider_query,
+            )
 
-        run_scenario(
-            scenario_name="idempotent_re_query",
-            stations=stations_to_test[:1],
-            ranges=short_handoff_ranges[:1],
-            repetitions=2,
-            manager=query_manager,
-            db=meteo_db,
-            provider=provider_query,
-        )
+            run_scenario(
+                scenario_name="idempotent_re_query",
+                stations=stations_to_test[:1],
+                ranges=short_handoff_ranges[:1],
+                repetitions=2,
+                manager=query_manager,
+                db=meteo_db,
+                provider=provider_query,
+            )
 
-        run_scenario(
-            scenario_name="adjacent_windows_multiple_stations",
-            stations=stations_to_test,
-            ranges=short_handoff_ranges,
-            repetitions=1,
-            manager=query_manager,
-            db=meteo_db,
-            provider=provider_query,
-        )
+            run_scenario(
+                scenario_name="adjacent_windows_multiple_stations",
+                stations=stations_to_test,
+                ranges=short_handoff_ranges,
+                repetitions=1,
+                manager=query_manager,
+                db=meteo_db,
+                provider=provider_query,
+            )
 
-        run_scenario(
-            scenario_name="scattered_daytime_checks",
-            stations=stations_to_test[:2],
-            ranges=mixed_day_ranges,
-            repetitions=1,
-            manager=query_manager,
-            db=meteo_db,
-            provider=provider_query,
-        )
+            run_scenario(
+                scenario_name="scattered_daytime_checks",
+                stations=stations_to_test[:2],
+                ranges=mixed_day_ranges,
+                repetitions=1,
+                manager=query_manager,
+                db=meteo_db,
+                provider=provider_query,
+            )
 
-    finally:
-        meteo_db.close()
+        finally:
+            meteo_db.close()
 
 
 if __name__ == "__main__":
