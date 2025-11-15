@@ -50,6 +50,12 @@ class SBRMeteo(BaseMeteoHandler):
     stations_url = 'data/sbr.geojson'
     user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 
+    ##Possible values for certain columns. May change over time, add new values here
+    _DATUM_COLNAMES = ['Datum', 'measurementTime']
+    _CREATED_COLNAMES = ['create_time', 'createdAt']
+    _STATION_ID_COLNAMES = ['station_id', 'stationId']
+
+
     def __init__(self, username: str, password: str, timezone: str, **kwargs):
         self.username = username
         self.password = password
@@ -118,6 +124,17 @@ class SBRMeteo(BaseMeteoHandler):
         if self._session is not None:
             self._session.close()
             self._session = None
+
+    def _get_available_columns(self, tbl, type):
+        if type == 'datetime':
+            return [i for i in self._DATUM_COLNAMES if i in tbl.columns]
+        elif type == 'create_time':
+            return [i for i in self._CREATED_COLNAMES if i in tbl.columns]
+        elif type == 'station_id':
+            return [i for i in self._STATION_ID_COLNAMES if i in tbl.columns]
+        else:
+            raise ValueError(f'Invalid type {type} to get available columns.')
+
 
     def get_station_info(self, station_id: str) -> dict[str, Any]:
         """
@@ -342,16 +359,47 @@ class SBRMeteo(BaseMeteoHandler):
         tbl.rename(columns=lambda x: sbr_colmap[x]['kuerzel_de'] if x in sbr_colmap.keys() else x, inplace=True)
         tbl.rename(columns={'x': 'Datum'}, inplace=True)
 
-        # Handle timestamp conversions with error handling
-        try:
-            if 'create_time' in tbl.columns:
-                tbl['create_time'] = tbl['create_time'].apply(
+        # Handle column conversions with error handling
+        station_id_columns = self._get_available_columns(tbl, 'station_id')
+        if station_id_columns:
+            station_id_name = station_id_columns[0]
+            try:
+                tbl[station_id_name] = tbl[station_id_name].apply(lambda x: x.strip('"') if pd.notna(x) else x)
+                tbl.rename(columns = {station_id_name: 'station_id'}, inplace = True)
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Error processing station_id: {e}")
+        else:
+            raise ValueError(f"No columns named {' or '.join(self._STATION_ID_COLNAMES).strip(' or ')} found in SBR data. Please check schema returned by api and update SBRMeteo accordingly.")
+
+        datetime_columns = self._get_available_columns(tbl, 'datetime')
+        if datetime_columns:
+            datetime_name = datetime_columns[0]
+            try:
+                tbl[datetime_name] = tbl[datetime_name].apply(
+                    lambda x: datetime.datetime.fromtimestamp(int(x)) if pd.notna(x) else pd.NaT
+                )
+                tbl[datetime_name] = tbl[datetime_name].dt.tz_localize(tz=self.timezone).dt.tz_convert('UTC')
+                tbl[datetime_name] = tbl[datetime_name].dt.floor(self.freq) #set seconds to 0
+                tbl.rename(columns = {datetime_name: 'Datum'}, inplace = True)
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Error converting Datum: {e}")
+        else:
+            raise ValueError(f'No columns named {' or '.join(self._DATUM_COLNAMES).strip(' or ')} found in SBR data. Please check schema returned by api and update SBRMeteo accordingly.')
+ 
+        create_time_column = self._get_available_columns(tbl, 'create_time')
+        if create_time_column:
+            create_time_name = create_time_column[0]
+            try:
+                tbl[create_time_name] = tbl[create_time_name].apply(
                     lambda x: datetime.datetime.fromtimestamp(int(x), tz=pytz.timezone(self.timezone)) if pd.notna(x) else pd.NaT
                 )
                 # Convert to UTC for consistency
-                tbl['create_time'] = tbl['create_time'].dt.tz_convert('UTC')
-        except (ValueError, TypeError) as e:
-            logger.warning(f"Error converting create_time: {e}")
+                tbl[create_time_name] = tbl[create_time_name].dt.tz_convert('UTC')
+                tbl.rename(columns = {create_time_name: 'create_time'}, inplace = True)
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Error converting create_time: {e}")
+        else:
+            logger.warning(f"No columns named {' or '.join(self._CREATED_COLNAMES).strip(' or ')} found in SBR data.")
 
         try:
             if 'rainStart' in tbl.columns:
@@ -360,22 +408,6 @@ class SBRMeteo(BaseMeteoHandler):
                 tbl['rainStart'] = tbl['rainStart'].dt.tz_localize(tz = self.timezone).dt.tz_convert('UTC')
         except (ValueError, TypeError) as e:
             logger.warning(f"Error converting rainStart: {e}")
-
-        try:
-            if 'station_id' in tbl.columns:
-                tbl['station_id'] = tbl['station_id'].apply(lambda x: x.strip('"') if pd.notna(x) else x)
-        except (ValueError, TypeError) as e:
-            logger.warning(f"Error processing station_id: {e}")
-
-        try:
-            if 'Datum' in tbl.columns:
-                tbl['Datum'] = tbl['Datum'].apply(
-                    lambda x: datetime.datetime.fromtimestamp(int(x)) if pd.notna(x) else pd.NaT
-                )
-                tbl['Datum'] = tbl['Datum'].dt.tz_localize(tz=self.timezone).dt.tz_convert('UTC')
-                tbl['Datum'] = tbl['Datum'].dt.floor(self.freq) #set seconds to 0
-        except (ValueError, TypeError) as e:
-            logger.warning(f"Error converting Datum: {e}")
 
         return tbl
 
