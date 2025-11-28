@@ -327,15 +327,15 @@ class SBRMeteo(BaseMeteoHandler):
         tbl_re = tbl.copy()
         for col in tbl_re.columns:
             unit = sbr_colmap.get(col, {'einheit': ''})['einheit']
-            try:
-                if unit in ['mm', 'degC', '%', 'm*s-1']:
-                    tbl_re[col] = tbl_re[col].astype(np.float64)
-                elif unit == 'Ein/Aus':
-                    tbl_re[col] = tbl_re[col].astype(bool).astype(int)
-                else:
-                    tbl_re[col] = tbl_re[col].astype(str)
-            except (ValueError, TypeError) as e:
-                logger.warning(f"Error converting column {col} to appropriate dtype: {e}")
+
+            # normalize null-ish sentinels
+            tbl_re[col] = tbl_re[col].replace({"null": np.nan, "NULL": np.nan, None: np.nan})
+
+            if unit in ["mm", "degC", "%", "m*s-1"]:
+                tbl_re[col] = pd.to_numeric(tbl_re[col], errors="coerce").astype("float64")
+            elif unit == "Ein/Aus":
+                tbl_re[col] = pd.to_numeric(tbl_re[col], errors="coerce").astype("Int64")
+            else:
                 tbl_re[col] = tbl_re[col].astype(str)
                 
         return tbl_re
@@ -375,12 +375,14 @@ class SBRMeteo(BaseMeteoHandler):
         if datetime_columns:
             datetime_name = datetime_columns[0]
             try:
-                tbl[datetime_name] = tbl[datetime_name].apply(
-                    lambda x: datetime.datetime.fromtimestamp(int(x)) if pd.notna(x) else pd.NaT
+                numeric_ts = pd.to_numeric(tbl[datetime_name], errors="coerce")
+                tbl[datetime_name] = (
+                    pd.to_datetime(numeric_ts, unit="s", errors="coerce")
+                    .dt.tz_localize(self.timezone)
+                    .dt.tz_convert("UTC")
+                    .dt.floor(self.freq)
                 )
-                tbl[datetime_name] = tbl[datetime_name].dt.tz_localize(tz=self.timezone).dt.tz_convert('UTC')
-                tbl[datetime_name] = tbl[datetime_name].dt.floor(self.freq) #set seconds to 0
-                tbl.rename(columns = {datetime_name: 'Datum'}, inplace = True)
+                tbl.rename(columns={datetime_name: "Datum"}, inplace=True)
             except (ValueError, TypeError) as e:
                 logger.warning(f"Error converting Datum: {e}")
         else:
@@ -390,12 +392,13 @@ class SBRMeteo(BaseMeteoHandler):
         if create_time_column:
             create_time_name = create_time_column[0]
             try:
-                tbl[create_time_name] = tbl[create_time_name].apply(
-                    lambda x: datetime.datetime.fromtimestamp(int(x), tz=pytz.timezone(self.timezone)) if pd.notna(x) else pd.NaT
+                numeric_ct = pd.to_numeric(tbl[create_time_name], errors="coerce")
+                tbl[create_time_name] = (
+                    pd.to_datetime(numeric_ct, unit="s", errors="coerce")
+                    .dt.tz_localize(self.timezone)
+                    .dt.tz_convert("UTC")
                 )
-                # Convert to UTC for consistency
-                tbl[create_time_name] = tbl[create_time_name].dt.tz_convert('UTC')
-                tbl.rename(columns = {create_time_name: 'create_time'}, inplace = True)
+                tbl.rename(columns={create_time_name: "create_time"}, inplace=True)
             except (ValueError, TypeError) as e:
                 logger.warning(f"Error converting create_time: {e}")
         else:
