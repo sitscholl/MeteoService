@@ -99,10 +99,11 @@ class QueryManager:
             return pd.DataFrame()
 
         all_data: list[pd.DataFrame] = []
+        n = len(gaps)
 
         try:
             with provider:
-                for start_gap, end_gap in gaps:
+                for i, (start_gap, end_gap) in enumerate(gaps):
                     gap_days = (end_gap - start_gap).days
                     max_gap_days = self.config.get('settings', {}).get('max_gap_days', 30)
                     
@@ -123,9 +124,9 @@ class QueryManager:
                     logger.info(f"Fetching data from {provider_name} for {start_gap} to {end_gap}")
 
                     provider_inclusion = provider.inclusive
-                    if provider_inclusion == 'left':
+                    if provider_inclusion == 'left' and i == n - 1:
                         end_gap = end_gap + pd.Timedelta(freq)
-                    if provider_inclusion == 'right':
+                    if provider_inclusion == 'right' and i == 0:
                         start_gap = start_gap - pd.Timedelta(freq)
                     
                     provider_data = provider.run(
@@ -149,6 +150,7 @@ class QueryManager:
 
                     #Add missing timestamps
                     provider_data.set_index('datetime', inplace=True)
+                    provider_data = provider_data[~provider_data.index.duplicated(keep='last')]
                     provider_data = provider_data.reindex(gap_index) #maybe use a tolerance here that equals freq?
 
                     #Add missing variables
