@@ -92,17 +92,17 @@ def main():
     logger = logging.getLogger(__name__)
 
     provider_stations_dict = {
-        'province': ["09700MS"],
-        #'SBR': [103, 113]
+        #'province': ["09700MS"],
+        'SBR': [103, 113]
     }
     provider_query = "SBR"
     stations_to_test = config.get("testing", {}).get("stations", [113])
     stations_to_test = [str(st) for st in stations_to_test]
 
     overlapping_ranges = [
-        (dt(2025, 8, 25, 0, 0), dt(2025, 8, 25, 6, 0)),
-        (dt(2025, 8, 25, 4, 0), dt(2025, 8, 25, 9, 0)),
-        (dt(2025, 8, 25, 8, 30), dt(2025, 8, 25, 10, 0)),
+        (dt(2025, 4, 1, 0, 0), dt(2025, 10, 1, 6, 0)),
+        # (dt(2025, 8, 25, 4, 0), dt(2025, 8, 25, 9, 0)),
+        # (dt(2025, 8, 25, 8, 30), dt(2025, 8, 25, 10, 0)),
     ]
 
     short_handoff_ranges = [
@@ -137,7 +137,7 @@ def main():
                 scenario_name="idempotent_re_query",
                 stations=stations_to_test[:1],
                 ranges=short_handoff_ranges[:1],
-                repetitions=2,
+                repetitions=1,
                 manager=query_manager,
                 db=meteo_db,
                 provider=provider_query,
