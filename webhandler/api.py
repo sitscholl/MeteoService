@@ -6,6 +6,8 @@ This demonstrates how to expose the database via REST API for fast access to cac
 from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
+import pandas as pd
+
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Union
 import pytz
@@ -218,8 +220,8 @@ async def _run_timeseries_query(
             ts_val = timestamp.isoformat()
         except Exception:
             ts_val = str(timestamp)
-        record = {"datetime": ts_val}
-        record.update(row.to_dict())
+        row_clean = row.where(pd.notna(row), None).to_dict()
+        record = {"datetime": ts_val, **row_clean}
         data.append(record)
 
     query_metadata['result_timezone'] = str(getattr(df.index, "tz", None))
