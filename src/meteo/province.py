@@ -7,8 +7,8 @@ import time
 from typing import Dict, Any
 import logging
 
-from src.meteo.base import BaseMeteoHandler
-from src.utils import split_dates
+from .base import BaseMeteoHandler
+from ..utils import split_dates
 
 logger = logging.getLogger(__name__)
 

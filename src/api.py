@@ -13,10 +13,10 @@ from typing import Optional, List, Dict, Any, Union
 import pytz
 import logging
 
-from src import load_config
-from src.database.db import MeteoDB
-from src.query_manager import QueryManager
-from src.provider_manager import ProviderManager
+from .config import load_config
+from .database.db import MeteoDB
+from .query_manager import QueryManager
+from .provider_manager import ProviderManager
 
 # Load config file
 config = load_config("config/config.yaml")
