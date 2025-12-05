@@ -378,8 +378,7 @@ class SBRMeteo(BaseMeteoHandler):
                 numeric_ts = pd.to_numeric(tbl[datetime_name], errors="coerce")
                 tbl[datetime_name] = (
                     pd.to_datetime(numeric_ts, unit="s", errors="coerce")
-                    .dt.tz_localize(self.timezone)
-                    .dt.tz_convert("UTC")
+                    .dt.tz_localize("UTC") ##timestamp in html is in UTC!
                     .dt.floor(self.freq)
                 )
                 tbl.rename(columns={datetime_name: "Datum"}, inplace=True)
