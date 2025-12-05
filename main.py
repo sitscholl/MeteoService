@@ -3,8 +3,8 @@ import uvicorn
 import logging
 import logging.config
 
-from webhandler.config import load_config
-from webhandler.api import app
+from src.config import load_config
+from src.api import app
 
 # Load config file
 config = load_config("config/config.yaml")

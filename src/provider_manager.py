@@ -46,7 +46,7 @@ class ProviderManager:
             raise ImportError(f"Meteo directory not found at {meteo_dir}")
         
         # Import all modules in the meteo package
-        meteo_package = 'webhandler.meteo'
+        meteo_package = 'src.meteo'
         
         for _, module_name, _ in pkgutil.iter_modules([str(meteo_dir)]):
             if module_name not in ignore_modules:

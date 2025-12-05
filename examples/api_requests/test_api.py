@@ -92,12 +92,12 @@ def main():
         response = requests.get(f"{API_BASE_URL}/health")
         if response.status_code != 200:
             print(f"API health check failed: {response.status_code}")
-            print("Make sure the API server is running with: uvicorn webhandler.api:app --reload")
+            print("Make sure the API server is running with: uvicorn src.api:app --reload")
             return
         print("✓ API is healthy")
     except requests.exceptions.RequestException:
         print("✗ Cannot connect to API server")
-        print("Make sure the API server is running with: uvicorn webhandler.api:app --reload")
+        print("Make sure the API server is running with: uvicorn src.api:app --reload")
         return
     
     # Test examples

@@ -2,7 +2,7 @@ from pathlib import Path
 import time
 import shutil
 
-from webhandler.driver import Driver
+from src.driver import Driver
 
 download_dir = 'downloads'
 Path(download_dir).mkdir(parents = True, exist_ok=True)

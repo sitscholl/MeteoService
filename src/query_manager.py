@@ -5,9 +5,9 @@ import logging
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Tuple, Any
 
-from webhandler.database.db import MeteoDB
-from webhandler.provider_manager import ProviderManager
-from webhandler.utils import derive_datetime_gaps
+from src.database.db import MeteoDB
+from src.provider_manager import ProviderManager
+from src.utils import derive_datetime_gaps
 
 logger = logging.getLogger(__name__)
 

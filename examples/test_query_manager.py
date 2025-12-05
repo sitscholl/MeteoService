@@ -16,10 +16,10 @@ from typing import Iterable, Tuple
 
 import pytz
 
-from webhandler.query_manager import QueryManager
-from webhandler.config import load_config
-from webhandler.database.db import MeteoDB
-from webhandler.provider_manager import ProviderManager
+from src.query_manager import QueryManager
+from src.config import load_config
+from src.database.db import MeteoDB
+from src.provider_manager import ProviderManager
 
 
 tz = pytz.timezone("utc")
@@ -100,9 +100,9 @@ def main():
     stations_to_test = [str(st) for st in stations_to_test]
 
     overlapping_ranges = [
-        (dt(2025, 4, 1, 0, 0), dt(2025, 10, 1, 6, 0)),
-        # (dt(2025, 8, 25, 4, 0), dt(2025, 8, 25, 9, 0)),
-        # (dt(2025, 8, 25, 8, 30), dt(2025, 8, 25, 10, 0)),
+        # (dt(2025, 4, 1, 0, 0), dt(2025, 10, 1, 6, 0)),
+        (dt(2025, 11, 25, 4, 0), dt(2025, 11, 25, 9, 0)),
+        (dt(2025, 8, 25, 8, 30), dt(2025, 8, 25, 10, 0)),
     ]
 
     short_handoff_ranges = [
