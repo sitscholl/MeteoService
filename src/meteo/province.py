@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 PROVINCE_RENAME = {
     "DATE": "datetime",
     "LT": "tair_2m",
+    "LF": "relative_humidity",
     "N": "precipitation",
     "WG": "wind_speed",
     "WR": "wind_direction",
@@ -36,8 +37,9 @@ class ProvinceMeteo(BaseMeteoHandler):
     stations_url = base_url + "/stations"
     timeseries_url = base_url + "/timeseries"
 
-    def __init__(self, timezone: str, **kwargs):
+    def __init__(self, timezone: str, chunk_size_days: int = 365, **kwargs):
         self.timezone = timezone
+        self.chunk_size_days = chunk_size_days
         self.station_codes = None
         self.station_sensors = {}
 
@@ -98,7 +100,6 @@ class ProvinceMeteo(BaseMeteoHandler):
             start: datetime.datetime,
             end: datetime.datetime,
             sleep_time: int = 1,
-            request_batch_size = 365,
             split_on_year = True,
             sensor_codes: list[str] | None = None,
             **kwargs
@@ -110,7 +111,7 @@ class ProvinceMeteo(BaseMeteoHandler):
         start = start.astimezone(pytz.timezone(self.timezone))
         end = end.astimezone(pytz.timezone(self.timezone))
         
-        dates_split = split_dates(start, end, n_days = request_batch_size, split_on_year=split_on_year)
+        dates_split = split_dates(start, end, n_days = self.chunk_size_days, split_on_year=split_on_year)
         if sensor_codes is None:
             sensor_codes = self.get_sensors_for_station(station_id)
         else:
