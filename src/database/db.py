@@ -189,42 +189,85 @@ class MeteoDB:
         # Make a copy to avoid modifying the original DataFrame
         df = data.copy()
 
-        for st_id, station_data in df.groupby('station_id'):
-
-            #Get internal station entry and create if it does not exist
-            # ##TODO: Query station info from provider class and get all attributes 
+        # Ensure each referenced station exists once up front
+        station_id_map: dict[str, int] = {}
+        for st_id, station_group in df.groupby('station_id'):
             station_entry = self.insert_station(provider, st_id)
-
             if station_entry is None:
                 logger.warning(f"Skipping insertion of data from {st_id} as station could not be inserted into database")
                 continue
+            station_id_map[st_id] = station_entry.id
 
-            for var in variable_columns:
-                variable_entry = self.insert_variable(name=var)
+        if not station_id_map:
+            logger.warning("No stations could be inserted. Aborting measurement insertion.")
+            return
 
-                if variable_entry is None:
-                    logger.warning(f"Skipping insertion of data from {st_id} and variable {var} as variable could not be inserted into database")
-                    continue
+        # Only keep rows where station insert succeeded
+        df = df[df['station_id'].isin(station_id_map)].copy()
 
-                measurements = station_data[['datetime', var]].copy()
+        # Ensure all variables exist and cache their ids
+        variable_id_map: dict[str, int] = {}
+        for var in variable_columns:
+            variable_entry = self.insert_variable(name=var)
+            if variable_entry is None:
+                logger.warning(f"Skipping variable {var} as it could not be inserted into database")
+                continue
+            variable_id_map[var] = variable_entry.id
+
+        if not variable_id_map:
+            logger.warning("No variables could be inserted. Aborting measurement insertion.")
+            return
+
+        # Drop any variable columns that failed to register
+        active_variables = list(variable_id_map.keys())
+
+        measurements = df[['datetime', 'station_id'] + active_variables].copy()
+
+        try:
+            if measurements['datetime'].dt.tz is None:
+                measurements['datetime'] = measurements['datetime'].dt.tz_localize('UTC')
+            else:
                 measurements['datetime'] = measurements['datetime'].dt.tz_convert('UTC')
-                measurements['station_id'] = station_entry.id
-                measurements['variable_id'] = variable_entry.id
-                measurements.rename(columns = {var: 'value'}, inplace = True)
-                
-                try:
-                    measurements.to_sql(
-                        name='measurements',
-                        con=self.engine,
-                        index=index,
-                        index_label=index_label,
-                        if_exists=if_exists
-                    )
-                    self.session.commit()
-                    logger.info(f"Successfully inserted {len(measurements)} measurements values for station {st_id} and variable {var}")
-                except Exception as e:
-                    self.session.rollback()
-                    logger.error(f"Error inserting data for station {st_id} and variable {var}: {e}")
+        except Exception as e:
+            logger.error(f"Failed to normalize datetimes to UTC: {e}")
+            return
+
+        # Convert wide table (one column per variable) into long form for bulk insert
+        measurements = measurements.melt(
+            id_vars=['datetime', 'station_id'],
+            value_vars=active_variables,
+            var_name='variable',
+            value_name='value'
+        )
+        # measurements.dropna(subset=['value'], inplace = True)
+
+        measurements['station_id'] = measurements['station_id'].map(station_id_map)
+        measurements['variable_id'] = measurements['variable'].map(variable_id_map)
+        measurements.drop(columns = ['variable'], inplace = True)
+
+        # Remove rows where station or variable lookup failed for any reason
+        measurements.dropna(subset=['station_id', 'variable_id'], inplace = True)
+
+        if measurements.empty:
+            logger.warning("No measurement rows to insert after preprocessing.")
+            return
+
+        # Ensure column order matches the measurements table definition
+        measurements = measurements[['station_id', 'variable_id', 'datetime', 'value']]
+
+        try:
+            measurements.to_sql(
+                name='measurements',
+                con=self.engine,
+                index=index,
+                index_label=index_label,
+                if_exists=if_exists
+            )
+            self.session.commit()
+            logger.info(f"Successfully inserted {len(measurements)} measurement rows across {len(station_id_map)} stations and {len(active_variables)} variables.")
+        except Exception as e:
+            self.session.rollback()
+            logger.error(f"Error inserting bulk measurement data: {e}")
                     
     def close(self):
         """
