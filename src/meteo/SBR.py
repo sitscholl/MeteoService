@@ -54,12 +54,14 @@ class SBRMeteo(BaseMeteoHandler):
     _DATUM_COLNAMES = ['Datum', 'measurementTime']
     _CREATED_COLNAMES = ['create_time', 'createdAt']
     _STATION_ID_COLNAMES = ['station_id', 'stationId']
+    _DROP_COLUMNS = ['mg20', 'mg28', 'create_time', 'Ausf.'] #these columns will be dropped from dataframe. Use original names before applying SBR_rename
 
 
-    def __init__(self, username: str, password: str, timezone: str, **kwargs):
+    def __init__(self, username: str, password: str, timezone: str, chunk_size_days: int = 7, **kwargs):
         self.username = username
         self.password = password
         self.timezone = timezone
+        self.chunk_size_days = chunk_size_days
         self._session = None
 
     def __enter__(self):
@@ -185,7 +187,6 @@ class SBRMeteo(BaseMeteoHandler):
             end: datetime.datetime,
             data_type: str,
             sleep_time: int = 1,
-            request_batch_size = 7,
             **kwargs
         ) -> List[str]:
         """
@@ -227,7 +228,7 @@ class SBRMeteo(BaseMeteoHandler):
             "Accept-Language": "en-US,en;q=0.9"
         }
 
-        dates_split = split_dates(start, end, n_days=request_batch_size)
+        dates_split = split_dates(start, end, n_days=self.chunk_size_days)
         raw_responses = []
         
         for start_date, end_date in dates_split:
@@ -274,8 +275,15 @@ class SBRMeteo(BaseMeteoHandler):
         
         if not dataframes:
             return pd.DataFrame()
+
+        sbr_data = pd.concat(dataframes, ignore_index=True)
+
+        ## Drop unnecessary columns
+        for col_drop in self._DROP_COLUMNS:
+            if col_drop in sbr_data.columns:
+                sbr_data.drop(columns = col_drop, inplace = True)
             
-        return pd.concat(dataframes, ignore_index=True).rename(columns = SBR_RENAME)
+        return sbr_data.rename(columns = SBR_RENAME)
 
     def _extract_data_from_response(
         self,
