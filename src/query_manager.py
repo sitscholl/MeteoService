@@ -233,14 +233,14 @@ class QueryManager:
         # Ensure we don't query the future
         now_floor = pd.Timestamp(now_utc).floor(provider_freq)
         if end_time_round > now_floor:
-            logger.warning(f"Requested end time is in the future. Capping at {now_floor}")
+            logger.warning(f"Requested end time is in the future. Capping at {now_floor} (UTC)")
             end_time_round = now_floor
 
         if start_time_round >= end_time_round:
             # Handle cases where the range is smaller than the frequency
             return pd.DataFrame() 
 
-        logger.info(f"Querying data from {start_time_round} to {end_time_round} with frequency {provider_freq} and provider {provider}")
+        logger.info(f"Querying data from {start_time_round} (UTC) to {end_time_round} (UTC) with frequency {provider_freq} and provider {provider}")
 
         # First, get existing data from database
         existing_data = db.query_data(
