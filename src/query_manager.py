@@ -131,7 +131,7 @@ class QueryManager:
                     )
 
                     if provider_data.empty:
-                        logger.debug(f"No data returned for {start_gap} - {end_gap}")
+                        logger.warning(f"No data returned for {start_gap} - {end_gap}")
                         if all_variables:
                             placeholder = pd.DataFrame({
                                 'datetime': gap_index,
@@ -215,7 +215,7 @@ class QueryManager:
         start_time_utc = pd.Timestamp( start_time.astimezone(timezone.utc) ).floor(provider_freq)
         end_time_utc = pd.Timestamp( end_time.astimezone(timezone.utc) ).ceil(provider_freq)
 
-        logger.info(f"Querying data from {start_time_utc} to {end_time_utc} with frequency {provider_freq}")
+        logger.info(f"Querying data from {start_time_utc} to {end_time_utc} with frequency {provider_freq} and provider {provider}")
 
         # First, get existing data from database
         existing_data = db.query_data(
@@ -227,7 +227,7 @@ class QueryManager:
         )
 
         if not existing_data.empty:
-            logger.debug(f"Found existing data ranging from {existing_data.index.min()} to {existing_data.index.max()}")
+            logger.info(f"Found existing data ranging from {existing_data.index.min()} to {existing_data.index.max()}")
                         
         # Find gaps in the data
         gaps = self._find_data_gaps(existing_data, start_time_utc, end_time_utc, freq = provider_freq)
