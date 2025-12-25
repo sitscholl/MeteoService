@@ -316,7 +316,7 @@ class SBRMeteo(BaseMeteoHandler):
                 row = {j.split(':')[0]: j.split(':')[1] for j in n if ':' in j}
                 if row:  # Only add non-empty rows
                     rows.append(row)
-            except (IndexError, ValueError) as e:
+            except Exception as e:
                 logger.warning(f"Error parsing row data: {e}")
                 continue
                 
@@ -334,17 +334,20 @@ class SBRMeteo(BaseMeteoHandler):
         """
         tbl_re = tbl.copy()
         for col in tbl_re.columns:
-            unit = sbr_colmap.get(col, {'einheit': ''})['einheit']
+            try:
+                unit = sbr_colmap.get(col, {'einheit': ''})['einheit']
 
-            # normalize null-ish sentinels
-            tbl_re[col] = tbl_re[col].replace({"null": np.nan, "NULL": np.nan, None: np.nan})
+                # normalize null-ish sentinels
+                tbl_re[col] = tbl_re[col].replace({"null": np.nan, "NULL": np.nan, None: np.nan})
 
-            if unit in ["mm", "degC", "%", "m*s-1"]:
-                tbl_re[col] = pd.to_numeric(tbl_re[col], errors="coerce").astype("float64")
-            elif unit == "Ein/Aus":
-                tbl_re[col] = pd.to_numeric(tbl_re[col], errors="coerce").astype("Int64")
-            else:
-                tbl_re[col] = tbl_re[col].astype(str)
+                if unit in ["mm", "degC", "%", "m*s-1"]:
+                    tbl_re[col] = pd.to_numeric(tbl_re[col], errors="coerce").astype("float64")
+                elif unit == "Ein/Aus":
+                    tbl_re[col] = pd.to_numeric(tbl_re[col], errors="coerce").astype("Int64")
+                else:
+                    tbl_re[col] = tbl_re[col].astype(str)
+            except Exception as e:
+                logger.warning(f"Error assigning dtype of column {col}: {e}")
                 
         return tbl_re
 
@@ -374,7 +377,7 @@ class SBRMeteo(BaseMeteoHandler):
             try:
                 tbl[station_id_name] = tbl[station_id_name].apply(lambda x: x.strip('"') if pd.notna(x) else x)
                 tbl.rename(columns = {station_id_name: 'station_id'}, inplace = True)
-            except (ValueError, TypeError) as e:
+            except Exception as e:
                 logger.warning(f"Error processing station_id: {e}")
         else:
             raise ValueError(f"No columns named {' or '.join(self._STATION_ID_COLNAMES).strip(' or ')} found in SBR data. Please check schema returned by api and update SBRMeteo accordingly.")
