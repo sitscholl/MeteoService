@@ -246,7 +246,7 @@ class SBRMeteo(BaseMeteoHandler):
             response = self.session.get(self.timeseries_url, params=data_params, headers=data_headers)
             response.raise_for_status()
             
-            logger.debug(f"Response url: {response.request.url}")
+            # logger.debug(f"Response url: {response.request.url}")
             raw_responses.append(response.text)
             
             time.sleep(sleep_time)  # avoid too many requests in short time
@@ -390,7 +390,7 @@ class SBRMeteo(BaseMeteoHandler):
                     .dt.floor(self.freq)
                 )
                 tbl.rename(columns={datetime_name: "Datum"}, inplace=True)
-            except (ValueError, TypeError) as e:
+            except Exception as e:
                 logger.warning(f"Error converting Datum: {e}")
         else:
             raise ValueError(f'No columns named {' or '.join(self._DATUM_COLNAMES).strip(' or ')} found in SBR data. Please check schema returned by api and update SBRMeteo accordingly.')
@@ -402,11 +402,10 @@ class SBRMeteo(BaseMeteoHandler):
                 numeric_ct = pd.to_numeric(tbl[create_time_name], errors="coerce")
                 tbl[create_time_name] = (
                     pd.to_datetime(numeric_ct, unit="s", errors="coerce")
-                    .dt.tz_localize(self.timezone)
-                    .dt.tz_convert("UTC")
+                    .dt.tz_localize("UTC")
                 )
                 tbl.rename(columns={create_time_name: "create_time"}, inplace=True)
-            except (ValueError, TypeError) as e:
+            except Exception as e:
                 logger.warning(f"Error converting create_time: {e}")
         else:
             logger.warning(f"No columns named {' or '.join(self._CREATED_COLNAMES).strip(' or ')} found in SBR data.")
@@ -416,7 +415,7 @@ class SBRMeteo(BaseMeteoHandler):
                 tbl['rainStart'] = tbl['rainStart'].apply(lambda x: x.strip('"') if pd.notna(x) else x)
                 tbl['rainStart'] = pd.to_datetime(tbl['rainStart'], format='%Y-%m-%d %H', errors='coerce')
                 tbl['rainStart'] = tbl['rainStart'].dt.tz_localize(tz = self.timezone).dt.tz_convert('UTC')
-        except (ValueError, TypeError) as e:
+        except Exception as e:
             logger.warning(f"Error converting rainStart: {e}")
 
         return tbl
