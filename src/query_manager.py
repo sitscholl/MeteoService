@@ -36,7 +36,7 @@ class QueryManager:
             freq_delta = pd.Timedelta(freq_offset)
 
             start_time_aligned = pd.Timestamp(start_time).floor(freq)
-            end_time_aligned = pd.Timestamp(end_time).ceil(freq)
+            end_time_aligned = pd.Timestamp(end_time).floor(freq)
 
             complete_ts = pd.date_range(
                 start=start_time_aligned,
@@ -201,28 +201,53 @@ class QueryManager:
             raise ValueError("start_time must be timezone-aware")
         if end_time.tzinfo is None:
             raise ValueError("end_time must be timezone-aware")
+        if start_time.tzinfo != end_time.tzinfo:
+            raise ValueError("start_time and end_time must have the same timezone")
+        if start_time > end_time:
+            raise ValueError("start_time must be before end_time")
+        if start_time > datetime.now(timezone.utc).astimezone(start_time.tzinfo):
+            raise ValueError("start_time must be in the past")
 
         if not isinstance(station_id, str):
             station_id = str(station_id)
 
-        #Round to nearest hour to avoid inconsistencies between providers and data gaps
-        orig_timezone = start_time.tzinfo
         provider_handler = self.provider_manager.get_provider(provider.lower())
         if provider_handler is None:
             raise ValueError(f"No provider configured for '{provider}'. Available providers: {self.provider_manager.list_providers()}")
 
         provider_freq = provider_handler.freq
-        start_time_utc = pd.Timestamp( start_time.astimezone(timezone.utc) ).floor(provider_freq)
-        end_time_utc = pd.Timestamp( end_time.astimezone(timezone.utc) ).ceil(provider_freq)
 
-        logger.info(f"Querying data from {start_time_utc} to {end_time_utc} with frequency {provider_freq} and provider {provider}")
+        # Convert to UTC
+        orig_timezone = start_time.tzinfo
+        start_time_utc = start_time.astimezone(timezone.utc)
+        end_time_utc = end_time.astimezone(timezone.utc)
+        now_utc = datetime.now(timezone.utc)
+
+        # Round timestamps
+        # Floor the start to ensure we cover the interval
+        start_time_round = pd.Timestamp(start_time_utc).floor(provider_freq)
+        
+        # Floor the end to ensure we only query complete timestamps
+        end_time_round = pd.Timestamp(end_time_utc).floor(provider_freq)
+        
+        # Ensure we don't query the future
+        now_floor = pd.Timestamp(now_utc).floor(provider_freq)
+        if end_time_round > now_floor:
+            logger.warning(f"Requested end time is in the future. Capping at {now_floor}")
+            end_time_round = now_floor
+
+        if start_time_round >= end_time_round:
+            # Handle cases where the range is smaller than the frequency
+            return pd.DataFrame() 
+
+        logger.info(f"Querying data from {start_time_round} to {end_time_round} with frequency {provider_freq} and provider {provider}")
 
         # First, get existing data from database
         existing_data = db.query_data(
             provider=provider,
             station_id=station_id,
-            start_time=start_time_utc,
-            end_time=end_time_utc,
+            start_time=start_time_round,
+            end_time=end_time_round,
             variables=variables
         )
 
@@ -230,7 +255,7 @@ class QueryManager:
             logger.info(f"Found existing data ranging from {existing_data.index.min()} to {existing_data.index.max()}")
                         
         # Find gaps in the data
-        gaps = self._find_data_gaps(existing_data, start_time_utc, end_time_utc, freq = provider_freq)
+        gaps = self._find_data_gaps(existing_data, start_time_round, end_time_round, freq = provider_freq)
         
         if not gaps:
             logger.info("No data gaps found")
@@ -259,8 +284,8 @@ class QueryManager:
                 complete_data = db.query_data(
                     provider=provider,
                     station_id=station_id,
-                    start_time=start_time_utc,
-                    end_time=end_time_utc,
+                    start_time=start_time_round,
+                    end_time=end_time_round,
                     variables=variables
                 )
                 complete_data.index = complete_data.index.tz_convert(orig_timezone)
