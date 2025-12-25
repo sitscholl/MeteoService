@@ -124,25 +124,28 @@ class ProvinceMeteo(BaseMeteoHandler):
         raw_responses = []
         for query_start, query_end in dates_split:
             for sensor in sensor_codes:
-                data_params = {
-                    "station_code": station_id,
-                    "sensor_code": sensor,
-                    "date_from": query_start.strftime("%Y%m%d%H%M"),
-                    "date_to": query_end.strftime("%Y%m%d%H%M")
-                }
-                response = requests.get(self.timeseries_url, params = data_params)
-                response.raise_for_status()
+                try:
+                    data_params = {
+                        "station_code": station_id,
+                        "sensor_code": sensor,
+                        "date_from": query_start.strftime("%Y%m%d%H%M"),
+                        "date_to": query_end.strftime("%Y%m%d%H%M")
+                    }
+                    response = requests.get(self.timeseries_url, params = data_params)
+                    response.raise_for_status()
 
-                response_data = pd.DataFrame(response.json())
+                    response_data = pd.DataFrame(response.json())
 
-                if len(response_data) == 0:
-                    logger.warning(f"No data found for {data_params}")
-                    continue
+                    if len(response_data) == 0:
+                        logger.warning(f"No data found for {data_params}")
+                        continue
 
-                response_data['sensor'] = sensor
-                response_data['station_id'] = station_id
+                    response_data['sensor'] = sensor
+                    response_data['station_id'] = station_id
 
-                raw_responses.append(response_data)
+                    raw_responses.append(response_data)
+                except Exception as e:
+                    logger.error(f"Error fetching data for {sensor} for {query_start} - {query_end}: {e}")
 
                 time.sleep(sleep_time)
 
@@ -153,10 +156,13 @@ class ProvinceMeteo(BaseMeteoHandler):
         df_pivot = df_raw.pivot(columns = "sensor", values = "VALUE", index = ["DATE", "station_id"]).reset_index()
         df_pivot.rename(columns = PROVINCE_RENAME, inplace = True)
 
-        df_pivot['datetime'] = df_pivot['datetime'].map(lambda x: x.replace('CEST', '').replace('CET', ''))
-        df_pivot['datetime'] = pd.to_datetime(df_pivot['datetime'], format = "%Y-%m-%dT%H:%M:%S")
-        df_pivot['datetime'] = df_pivot['datetime'].dt.tz_localize(self.timezone).dt.tz_convert('UTC')
-        df_pivot['datetime'] = df_pivot['datetime'].dt.floor(self.freq)
+        try:
+            df_pivot['datetime'] = df_pivot['datetime'].map(lambda x: x.replace('CEST', '').replace('CET', ''))
+            df_pivot['datetime'] = pd.to_datetime(df_pivot['datetime'], format = "%Y-%m-%dT%H:%M:%S")
+            df_pivot['datetime'] = df_pivot['datetime'].dt.tz_localize(self.timezone).dt.tz_convert('UTC')
+            df_pivot['datetime'] = df_pivot['datetime'].dt.floor(self.freq)
+        except Exception as e:
+            logger.error(f"Error transforming datetime: {e}")
 
         # Precipitation is available in 5min freq while all others are in 10min freq. Drop additional timestamps for precipitation
         df_pivot = df_pivot.dropna(subset = [i for i in df_pivot.columns if i not in ['datetime', 'station_id', 'precipitation']], how = 'all')

@@ -232,22 +232,25 @@ class SBRMeteo(BaseMeteoHandler):
         raw_responses = []
         
         for start_date, end_date in dates_split:
-            # Make the GET request
-            data_params = {
-                "web_page": f"user-stations/{station_id}",
-                "graphType": data_type,
-                "skippath": "1",
-                "id": "/wetterstationen-custom",
-                "LANG": "",
-                "datefrom": f"{start_date:%Y.%m.%d %H:%M}",
-                "dateto": f"{end_date:%Y.%m.%d %H:%M}",
-            }
+            try:
+                # Make the GET request
+                data_params = {
+                    "web_page": f"user-stations/{station_id}",
+                    "graphType": data_type,
+                    "skippath": "1",
+                    "id": "/wetterstationen-custom",
+                    "LANG": "",
+                    "datefrom": f"{start_date:%Y.%m.%d %H:%M}",
+                    "dateto": f"{end_date:%Y.%m.%d %H:%M}",
+                }
 
-            response = self.session.get(self.timeseries_url, params=data_params, headers=data_headers)
-            response.raise_for_status()
-            
-            # logger.debug(f"Response url: {response.request.url}")
-            raw_responses.append(response.text)
+                response = self.session.get(self.timeseries_url, params=data_params, headers=data_headers)
+                response.raise_for_status()
+                
+                # logger.debug(f"Response url: {response.request.url}")
+                raw_responses.append(response.text)
+            except Exception as e:
+                logger.error(f"Error fetching data for {start_date} - {end_date}: {e}")
             
             time.sleep(sleep_time)  # avoid too many requests in short time
             
