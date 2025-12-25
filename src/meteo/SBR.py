@@ -228,7 +228,7 @@ class SBRMeteo(BaseMeteoHandler):
             "Accept-Language": "en-US,en;q=0.9"
         }
 
-        dates_split = split_dates(start, end, n_days=self.chunk_size_days)
+        dates_split = split_dates(start, end, freq = self.freq, n_days=self.chunk_size_days)
         raw_responses = []
         
         for start_date, end_date in dates_split:
