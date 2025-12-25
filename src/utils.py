@@ -135,35 +135,46 @@ def validate_date(date, target_format = "%d.%m.%Y"):
     except ValueError:
         raise ValueError(f'Start date needs to be in {target_format} format. Got {date}')
 
-def split_dates(start_date, end_date, n_days = 7, split_on_year = False):
+def split_dates(start_date, end_date, freq, n_days=7, split_on_year=False):
     """
-    Create a list of (start, end) date tuples that each span n_days, 
-    covering the period from start_date to end_date.
-    
-    Parameters:
-    - start_date: A date object or a string in "YYYY-MM-DD" format.
-    - end_date: A date object or a string in "YYYY-MM-DD" format.
-    - n_days: Number of days in each interval.
-    
-    Returns:
-    - List of tuples, where each tuple is (start_date, end_date) for that interval.
+    freq: string (e.g., '1h', '15min') or pd.Timedelta
     """
-
     if end_date < start_date:
         raise ValueError(f"Start date cannot be smaller than end date. Got {start_date} and {end_date}")
 
+    # Convert freq to a Timedelta for easy math
+    freq_delta = pd.Timedelta(freq)
     date_pairs = []
     current_start = start_date
     
-    while current_start < end_date:
-        potential_end = current_start + timedelta(days=n_days)
-        current_end = min(potential_end, end_date)
+    while current_start <= end_date:
+        # 1. Calculate the normal step (e.g., 7 days)
+        # Note: We subtract one frequency unit from the potential end 
+        # so that the chunk spans n_days TOTAL including the start and end.
+        potential_end = current_start + datetime.timedelta(days=n_days) - freq_delta
+        
+        if split_on_year:
+            # 2. Calculate the very last possible timestamp of the current year
+            # (December 31st, 23:59:59... or whatever the last 'freq' step is)
+            next_year_start = datetime.datetime(current_start.year + 1, 1, 1, tzinfo=current_start.tzinfo)
+            last_of_year = next_year_start - freq_delta
+            
+            # 3. Pick the earliest of the three boundaries
+            current_end = min(potential_end, end_date, last_of_year)
+        else:
+            current_end = min(potential_end, end_date)
 
-        if split_on_year and (current_end.year != current_start.year):
-            current_end = datetime.datetime(current_start.year, 12, 31, tzinfo = current_start.tzinfo)
+        # Safety: check we didn't go backwards
+        if current_end < current_start:
+            # This can happen if start_date is already the last timestamp of the year
+            # Force the end to be the start so we at least get one record
+            current_end = current_start
 
         date_pairs.append((current_start, current_end))
-        current_start = current_end
+        
+        # 4. MOVE TO THE NEXT TIMESTAMP
+        # The next start is exactly one frequency step after the current end
+        current_start = current_end + freq_delta
     
     return date_pairs
 
