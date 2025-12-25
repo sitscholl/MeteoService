@@ -92,17 +92,19 @@ def main():
     logger = logging.getLogger(__name__)
 
     provider_stations_dict = {
-        #'province': ["09700MS"],
+        'province': ["09700MS"],
         'SBR': [103, 113]
     }
-    provider_query = "SBR"
-    stations_to_test = config.get("testing", {}).get("stations", [113])
-    stations_to_test = [str(st) for st in stations_to_test]
+
+    long_ranges = [
+        (dt(2025, 10, 1, 0, 0), dt(2025, 12, 31, 23, 55)), #daylight saving time changes
+        (dt(2024, 12, 30, 0, 0), dt(2025, 1, 2, 0, 0))   #cross year boundary
+    ]
 
     overlapping_ranges = [
-        # (dt(2025, 4, 1, 0, 0), dt(2025, 10, 1, 6, 0)),
+        (dt(2025, 11, 24, 15, 0), dt(2025, 11, 25, 9, 0)),
         (dt(2025, 11, 25, 4, 0), dt(2025, 11, 25, 9, 0)),
-        (dt(2025, 8, 25, 8, 30), dt(2025, 8, 25, 10, 0)),
+        (dt(2025, 11, 25, 8, 30), dt(2025, 11, 25, 10, 0)),
     ]
 
     short_handoff_ranges = [
@@ -124,10 +126,20 @@ def main():
     for provider_query, stations_to_test in provider_stations_dict.items():
         try:
             run_scenario(
+                scenario_name="multi_month_ranges",
+                stations=stations_to_test,
+                ranges=long_ranges,
+                repetitions=1,
+                manager=query_manager,
+                db=meteo_db,
+                provider=provider_query,
+            )
+
+            run_scenario(
                 scenario_name="overlapping_windows_single_station",
-                stations=stations_to_test[:1],
+                stations=stations_to_test,
                 ranges=overlapping_ranges,
-                repetitions=2,
+                repetitions=1,
                 manager=query_manager,
                 db=meteo_db,
                 provider=provider_query,
@@ -135,7 +147,7 @@ def main():
 
             run_scenario(
                 scenario_name="idempotent_re_query",
-                stations=stations_to_test[:1],
+                stations=stations_to_test,
                 ranges=short_handoff_ranges[:1],
                 repetitions=1,
                 manager=query_manager,
@@ -155,7 +167,7 @@ def main():
 
             run_scenario(
                 scenario_name="scattered_daytime_checks",
-                stations=stations_to_test[:2],
+                stations=stations_to_test,
                 ranges=mixed_day_ranges,
                 repetitions=1,
                 manager=query_manager,
