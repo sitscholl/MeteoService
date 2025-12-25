@@ -145,7 +145,7 @@ class ProvinceMeteo(BaseMeteoHandler):
 
                     raw_responses.append(response_data)
                 except Exception as e:
-                    logger.error(f"Error fetching data for {sensor} for {query_start} - {query_end}: {e}")
+                    logger.error(f"Error fetching data for {sensor} for {query_start} - {query_end} with url {response.request.url}: {e}", exc_info = True)
 
                 time.sleep(sleep_time)
 

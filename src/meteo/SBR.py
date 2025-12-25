@@ -250,7 +250,7 @@ class SBRMeteo(BaseMeteoHandler):
                 # logger.debug(f"Response url: {response.request.url}")
                 raw_responses.append(response.text)
             except Exception as e:
-                logger.error(f"Error fetching data for {start_date} - {end_date}: {e}")
+                logger.error(f"Error fetching data for {start_date} - {end_date} with url {response.request.url}: {e}", exc_info = True)
             
             time.sleep(sleep_time)  # avoid too many requests in short time
             
