@@ -115,7 +115,7 @@ class QueryManager:
                     if gap_index.empty:
                         continue
                     
-                    logger.info(f"Fetching data from {provider_name} for {start_gap} to {end_gap}")
+                    logger.debug(f"Fetching data gap from {start_gap} to {end_gap} ")
 
                     provider_inclusion = provider.inclusive
                     if provider_inclusion == 'left' and i == n - 1:
@@ -215,7 +215,7 @@ class QueryManager:
         start_time_utc = pd.Timestamp( start_time.astimezone(timezone.utc) ).floor(provider_freq)
         end_time_utc = pd.Timestamp( end_time.astimezone(timezone.utc) ).ceil(provider_freq)
 
-        logger.debug(f"Querying data from {start_time_utc} to {end_time_utc} with frequency {provider_freq}")
+        logger.info(f"Querying data from {start_time_utc} to {end_time_utc} with frequency {provider_freq}")
 
         # First, get existing data from database
         existing_data = db.query_data(
