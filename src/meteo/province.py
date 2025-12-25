@@ -111,7 +111,7 @@ class ProvinceMeteo(BaseMeteoHandler):
         start = start.astimezone(pytz.timezone(self.timezone))
         end = end.astimezone(pytz.timezone(self.timezone))
         
-        dates_split = split_dates(start, end, n_days = self.chunk_size_days, split_on_year=split_on_year)
+        dates_split = split_dates(start, end, freq = self.freq, n_days = self.chunk_size_days, split_on_year=split_on_year)
         if sensor_codes is None:
             sensor_codes = self.get_sensors_for_station(station_id)
         else:
@@ -157,9 +157,23 @@ class ProvinceMeteo(BaseMeteoHandler):
         df_pivot.rename(columns = PROVINCE_RENAME, inplace = True)
 
         try:
-            df_pivot['datetime'] = df_pivot['datetime'].map(lambda x: x.replace('CEST', '').replace('CET', ''))
-            df_pivot['datetime'] = pd.to_datetime(df_pivot['datetime'], format = "%Y-%m-%dT%H:%M:%S")
-            df_pivot['datetime'] = df_pivot['datetime'].dt.tz_localize(self.timezone).dt.tz_convert('UTC')
+            # 1. Capture whether it was Summer Time (CEST) before stripping
+            is_dst = df_pivot['datetime'].str.contains('CEST')
+
+            # 2. Strip the strings
+            df_pivot['datetime'] =  df_pivot['datetime'].str.replace('CEST', '', regex=False).str.replace('CET', '', regex=False)
+
+            # 3. Convert to naive datetime
+            df_pivot['datetime'] = pd.to_datetime(df_pivot['datetime'], format="%Y-%m-%dT%H:%M:%S")
+
+            # 4. Localize using the mask to resolve ambiguity
+            # ambiguous=is_dst tells pandas: "If this hour repeats, use the DST version if is_dst is True"
+            df_pivot['datetime'] = df_pivot['datetime'].dt.tz_localize(
+                self.timezone, 
+                ambiguous=is_dst,
+                nonexistent='shift_forward' # handle the spring "gap" too
+            ).dt.tz_convert('UTC')
+
             df_pivot['datetime'] = df_pivot['datetime'].dt.floor(self.freq)
         except Exception as e:
             logger.error(f"Error transforming datetime: {e}")
