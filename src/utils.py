@@ -154,16 +154,13 @@ def split_dates(start_date, end_date, n_days = 7, split_on_year = False):
 
     date_pairs = []
     current_start = start_date
-
-    date_pairs = []
-    current_start = start_date
     
     while current_start < end_date:
         potential_end = current_start + timedelta(days=n_days)
         current_end = min(potential_end, end_date)
 
         if split_on_year and (current_end.year != current_start.year):
-            current_end = datetime.datetime(current_start.year, 12, 31) #check if this works if query does not inlcude last date?
+            current_end = datetime.datetime(current_start.year, 12, 31, tzinfo = current_start.tzinfo)
 
         date_pairs.append((current_start, current_end))
         current_start = current_end
