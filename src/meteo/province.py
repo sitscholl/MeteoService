@@ -258,8 +258,8 @@ if __name__ == '__main__':
     logging.basicConfig(level = logging.DEBUG, force = True)
 
     async def run_test():
-        start = datetime.datetime(2025, 1, 14)
-        end = datetime.datetime(2025, 10, 21)
+        start = datetime.datetime(2025, 1, 14).astimezone(pytz.timezone('Europe/Rome'))
+        end = datetime.datetime(2025, 10, 21).astimezone(pytz.timezone('Europe/Rome'))
 
         pr_handler = ProvinceMeteo(timezone = 'Europe/Rome')
         async with pr_handler as meteo_handler:
