@@ -174,6 +174,12 @@ class ProvinceMeteo(BaseMeteoHandler):
         if station_id not in possible_stations:
             raise ValueError(f"Invalid station_id {station_id}. Choose one from {possible_stations}")
 
+        # Validate timezone awareness
+        if start.tzinfo is None:
+            raise ValueError("start datetime must be timezone-aware")
+        if end.tzinfo is None:
+            raise ValueError("end datetime must be timezone-aware")
+
         start = start.astimezone(pytz.timezone(self.timezone))
         end = end.astimezone(pytz.timezone(self.timezone))
         
