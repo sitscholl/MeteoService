@@ -64,10 +64,14 @@ class BaseMeteoHandler(ABC):
         """Exit context management."""
         raise ValueError("MeteoHandlers have to be used in an asyncronous context. Use async with...")
 
+    async def _authenticate(self):
+        pass
+
     async def __aenter__(self):
         """Start httpx client that is reused across requests"""
         logger.info("Opening API session...")
         self._client = httpx.AsyncClient(timeout = self.timeout)
+        await self._authenticate()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -84,14 +88,14 @@ class BaseMeteoHandler(ABC):
         pass
 
     @abstractmethod
-    async def get_stations(self) -> list[str]:
+    async def get_stations(self) -> list[str] | None:
         """
         Get a list of available station ids
         """
         pass
 
     @abstractmethod
-    async def get_station_info(self, station_id: str | None) -> Dict[str, Any]:
+    async def get_station_info(self, station_id: str | None) -> Dict[str, Any] | None:
         """
         Query information for a given station from the source, 
         such as elevation, latitude or longitude. Query for all stations if no station is given.
