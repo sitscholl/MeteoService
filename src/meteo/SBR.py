@@ -1,13 +1,14 @@
 import pandas as pd
 import json
+import httpx
+import asyncio
 
-import requests
 import logging
 import datetime
 import numpy as np
 import re
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 import pytz
 from pathlib import Path
 
@@ -57,24 +58,27 @@ class SBRMeteo(BaseMeteoHandler):
     _DROP_COLUMNS = ['mg20', 'mg28', 'create_time', 'Ausf.'] #these columns will be dropped from dataframe. Use original names before applying SBR_rename
 
 
-    def __init__(self, username: str, password: str, timezone: str, chunk_size_days: int = 7, **kwargs):
+    def __init__(self, username: str, password: str, **kwargs):
+        super().__init__(**kwargs)
         self.username = username
         self.password = password
-        self.timezone = timezone
-        self.chunk_size_days = chunk_size_days
-        self._session = None
 
-    def __enter__(self):
-        """
-        Allows the object to be used in a 'with' block.
-        """
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        """
-        Ensure the session is closed when exiting the 'with' block.
-        """
-        self.close_session()
+        station_info_file = Path(self.stations_url)
+        if not station_info_file.exists():
+            logger.warning(f"Station info file for SBRMeteo not found. Got {self.stations_url}")
+        else:
+            try:
+                with station_info_file.open("r", encoding="utf-8") as file:
+                    info_data = json.load(file)
+                self.station_info = {i['properties']['st_id']: {
+                                        'latitude': i['properties'].get('lat'),
+                                        'longitude': i['properties'].get('lon'),
+                                        'elevation': None,
+                                        'name': i['properties'].get('st_name')
+                                    } for i in info_data['features']}
+                logger.info(f"Loaded station info file with {len(self.station_info.keys())} stations.")
+            except Exception as e:
+                logger.warning(f"Failed to load station info file with error: {e}")
 
     @property
     def freq(self):
@@ -84,48 +88,39 @@ class SBRMeteo(BaseMeteoHandler):
     def inclusive(self):
         return 'right'
 
-    @property
-    def session(self):
+    async def _authenticate(self):
         """
-        Manages the session with the SBR website, handling login if necessary.
+        Log in to SBR website
         """
-        if self._session is None:
-            self._session = requests.Session()
-            login_payload = {
-                "ajaxform": "84",
-                "login": "84",
-                "path": "",
-                "username": self.username,
-                "password": self.password,
-                "remember": "1"
-            }
 
-            # Headers (some websites require headers to mimic a browser request)
-            login_headers = {
-                "User-Agent": self.user_agent,
-                "Referer": self.login_url,
-                "Origin": "https://www3.beratungsring.org"
-            }
+        if self._client is None:
+            raise ValueError("Initialize client before requesting trying to authenticate")
 
-            # Send the POST request with form data
-            login_response = self._session.post(self.login_url, data=login_payload, headers=login_headers)
-            login_response.raise_for_status()
+        login_payload = {
+            "ajaxform": "84",
+            "login": "84",
+            "path": "",
+            "username": self.username,
+            "password": self.password,
+            "remember": "1"
+        }
 
-            # Check if login was successful
-            if "Logindaten vergessen" in login_response.text:
-                raise ValueError("Login failed! Check your credentials.")
-            else:
-                logger.debug('Login successful!')
+        # Headers (some websites require headers to mimic a browser request)
+        login_headers = {
+            "User-Agent": self.user_agent,
+            "Referer": self.login_url,
+            "Origin": "https://www3.beratungsring.org"
+        }
 
-        return self._session
+        # Send the POST request with form data
+        login_response = await self._client.post(self.login_url, data=login_payload, headers=login_headers, follow_redirects=True)
+        login_response.raise_for_status()
 
-    def close_session(self):
-        """
-        Closes the current session if it exists.
-        """
-        if self._session is not None:
-            self._session.close()
-            self._session = None
+        # Check if login was successful
+        if "Logindaten vergessen" in login_response.text:
+            raise ValueError("Login failed! Check your credentials.")
+        else:
+            logger.debug('Login successful!')
 
     def _get_available_columns(self, tbl, type):
         if type == 'datetime':
@@ -137,58 +132,81 @@ class SBRMeteo(BaseMeteoHandler):
         else:
             raise ValueError(f'Invalid type {type} to get available columns.')
 
-
-    def get_station_info(self, station_id: str) -> dict[str, Any]:
+    async def get_station_info(self, station_id: str | None) -> dict[str, Any]:
         """
-        Get station information from local file, as no API available
+        Get station information from local file, as no API is available
         """
 
-        station_info_file = Path(self.stations_url)
-        if not station_info_file.exists():
-            logger.warning(f"File {station_info_file} does not exist. Cannot fetch SBR station info.")
+        if self.station_info is None:
+            logger.warning("Station info not available. Cannot fetch SBR station info.")
             return {}
 
         if isinstance(station_id, int):
             station_id = str(station_id)
 
-        with station_info_file.open("r", encoding="utf-8") as file:
-            response_data = json.load(file)
+        if station_id is None:
+            return self.station_info
 
-        station_info = [i for i in response_data['features'] if i['properties']['st_id'] == station_id]
+        station_info = self.station_info.get(station_id)
 
-        if len(station_info) == 0 :
+        if station_info is None:
             logger.warning(f"No metadata found for {station_id}")
             return {}
         
-        station_props = station_info[0]['properties']
-        return {
-            'latitude': station_props.get('lat'),
-            'longitude': station_props.get('lon'),
-            'elevation': None,
-            'name': station_props.get('st_name')
-        }
+        return station_info
 
-    def get_station_codes(self):
-        
-        station_info_file = Path(self.stations_url)
-        if not station_info_file.exists():
-            logger.warning(f"File {station_info_file} does not exist. Cannot query station codes.")
+    async def get_stations(self):
+        if self.station_info is None:
+            logger.warning("Station info not available. Cannot get station list")
             return []
+        return list(self.station_info.keys())
 
-        with station_info_file.open("r", encoding="utf-8") as file:
-            response_data = json.load(file)
+    async def get_sensors(self):
+        return list(SBR_RENAME.keys())
 
-        return [i['properties']['st_id'] for i in response_data['features']]
+    async def _create_request_task(
+        self, station_id: str, date_range: Tuple[datetime, datetime], data_type
+        ):
 
-    def get_data(
+        if self._client is None:
+            raise ValueError("Initialize client before requesting data")
+
+        try:
+            start_date, end_date = date_range
+            data_headers = {
+                "User-Agent": self.user_agent,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+                "Accept-Encoding": "gzip, deflate, br, zstd",
+                "Accept-Language": "en-US,en;q=0.9"
+            }
+            data_params = {
+                "web_page": f"user-stations/{station_id}",
+                "graphType": data_type,
+                "skippath": "1",
+                "id": "/wetterstationen-custom",
+                "LANG": "",
+                "datefrom": f"{start_date:%Y.%m.%d %H:%M}",
+                "dateto": f"{end_date:%Y.%m.%d %H:%M}",
+            }
+
+            async with self._semaphore:
+                response = await self._client.get(self.timeseries_url, params=data_params, headers=data_headers)
+                response.raise_for_status()
+                await asyncio.sleep(self.sleep_time)
+            
+            return response.text
+        except Exception as e:
+            logger.error(f"Error fetching data for {start_date} - {end_date}: {e}", exc_info = True)
+            return None
+
+    async def get_raw_data(
             self,
             station_id: str | int,
             start: datetime.datetime,
             end: datetime.datetime,
-            data_type: str,
-            sleep_time: int = 1,
+            data_type: str = 'meteo',
             **kwargs
-        ) -> List[str]:
+        ) -> Tuple[List[str] | None, Dict[str, Any]]:
         """
         Query the raw data from the SBR website.
 
@@ -198,14 +216,14 @@ class SBRMeteo(BaseMeteoHandler):
                 - start (datetime.datetime): The start date and time (must be timezone-aware)
                 - end (datetime.datetime): The end date and time (must be timezone-aware)
                 - type (str): The type of data to retrieve (default: 'meteo')
-                - sleep (int): The time to sleep between requests (default: 1)
 
         Returns:
             List[str]: List of raw HTML response texts from the website
         """
 
-        if str(station_id) not in self.get_station_codes():
-            raise ValueError(f"Invalid station_id {station_id}. Choose one from {self.get_station_codes()}")
+        possible_stations = await self.get_stations()
+        if possible_stations and str(station_id) not in possible_stations:
+            raise ValueError(f"Invalid station_id {station_id}. Choose one from {possible_stations}")
 
         # Validate timezone awareness
         if start.tzinfo is None:
@@ -221,42 +239,23 @@ class SBRMeteo(BaseMeteoHandler):
         if end < start:
             raise ValueError(f'End date must be after start date. Got {start} - {end}')
 
-        data_headers = {
-            "User-Agent": self.user_agent,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-            "Accept-Encoding": "gzip, deflate, br, zstd",
-            "Accept-Language": "en-US,en;q=0.9"
-        }
-
         dates_split = split_dates(start, end, freq = self.freq, n_days=self.chunk_size_days)
-        raw_responses = []
         
-        for start_date, end_date in dates_split:
-            try:
-                # Make the GET request
-                data_params = {
-                    "web_page": f"user-stations/{station_id}",
-                    "graphType": data_type,
-                    "skippath": "1",
-                    "id": "/wetterstationen-custom",
-                    "LANG": "",
-                    "datefrom": f"{start_date:%Y.%m.%d %H:%M}",
-                    "dateto": f"{end_date:%Y.%m.%d %H:%M}",
-                }
+        request_tasks = []
+        for date_range in dates_split:
+            request_tasks.append(self._create_request_task(station_id, date_range, data_type))
 
-                response = self.session.get(self.timeseries_url, params=data_params, headers=data_headers)
-                response.raise_for_status()
-                
-                # logger.debug(f"Response url: {response.request.url}")
-                raw_responses.append(response.text)
-            except Exception as e:
-                logger.error(f"Error fetching data for {start_date} - {end_date} with url {response.request.url}: {e}", exc_info = True)
-            
-            time.sleep(sleep_time)  # avoid too many requests in short time
-            
-        return raw_responses
+        raw_responses = await asyncio.gather(*request_tasks)
+        raw_responses = [i for i in raw_responses if i is not None]
 
-    def transform(self, raw_data: List[str]) -> pd.DataFrame:
+        st_metadata = await self.get_station_info(station_id)
+        if len(raw_responses) > 0:
+            return raw_responses, st_metadata
+        else:
+            logger.warning(f"No data could be fetched for station {station_id}")
+            return None, st_metadata
+
+    def transform(self, raw_data: List[str] | None) -> pd.DataFrame:
         """
         Transform the raw HTML responses into a standardized DataFrame format.
         
@@ -266,17 +265,21 @@ class SBRMeteo(BaseMeteoHandler):
         Returns:
             pd.DataFrame: Transformed data in standardized format
         """
-        if not raw_data:
+        if raw_data is None:
             return pd.DataFrame()
             
         dataframes = []
         for response_text in raw_data:
-            rows = self._extract_data_from_response(response_text)
-            if rows:  # Only process if we have data
-                df = self._get_formatted_tbl(rows)
-                dataframes.append(df)
+            try:
+                rows = self._extract_data_from_response(response_text)
+                if rows:  # Only process if we have data
+                    df = self._get_formatted_tbl(rows)
+                    dataframes.append(df)
+            except Exception as e:
+                logger.error(f"Error extracting response data from html: {e}", exc_info = True)
         
         if not dataframes:
+            logger.warning("No data could be extracted from response text")
             return pd.DataFrame()
 
         sbr_data = pd.concat(dataframes, ignore_index=True)
@@ -383,7 +386,11 @@ class SBRMeteo(BaseMeteoHandler):
             except Exception as e:
                 logger.warning(f"Error processing station_id: {e}")
         else:
-            raise ValueError(f"No columns named {' or '.join(self._STATION_ID_COLNAMES).strip(' or ')} found in SBR data. Please check schema returned by api and update SBRMeteo accordingly.")
+            station_id_names = " or ".join(self._STATION_ID_COLNAMES)
+            raise ValueError(
+                f"No columns named {station_id_names} found in SBR data. "
+                "Please check schema returned by api and update SBRMeteo accordingly."
+            )
 
         datetime_columns = self._get_available_columns(tbl, 'datetime')
         if datetime_columns:
@@ -399,7 +406,11 @@ class SBRMeteo(BaseMeteoHandler):
             except Exception as e:
                 logger.warning(f"Error converting Datum: {e}")
         else:
-            raise ValueError(f'No columns named {' or '.join(self._DATUM_COLNAMES).strip(' or ')} found in SBR data. Please check schema returned by api and update SBRMeteo accordingly.')
+            datum_names = " or ".join(self._DATUM_COLNAMES)
+            raise ValueError(
+                f"No columns named {datum_names} found in SBR data. "
+                "Please check schema returned by api and update SBRMeteo accordingly."
+            )
  
         create_time_column = self._get_available_columns(tbl, 'create_time')
         if create_time_column:
@@ -414,7 +425,8 @@ class SBRMeteo(BaseMeteoHandler):
             except Exception as e:
                 logger.warning(f"Error converting create_time: {e}")
         else:
-            logger.warning(f"No columns named {' or '.join(self._CREATED_COLNAMES).strip(' or ')} found in SBR data.")
+            created_names = " or ".join(self._CREATED_COLNAMES)
+            logger.warning(f"No columns named {created_names} found in SBR data.")
 
         try:
             if 'rainStart' in tbl.columns:
@@ -429,5 +441,33 @@ class SBRMeteo(BaseMeteoHandler):
 
 if __name__ == "__main__":
 
-    sbr_handler = SBRMeteo('a', 'b', timezone = 'CET')
-    print(sbr_handler.get_station_info('-3'))
+    import logging
+    import yaml
+
+    logging.basicConfig(level = logging.DEBUG, force = True)
+
+    with open('config/config.yaml') as f:
+        config = yaml.safe_load(f)
+
+    user = config['providers']['sbr']['username']
+    password = config['providers']['sbr']['password']
+
+    async def run_test():
+        start = datetime.datetime(2025, 4, 1).astimezone(pytz.timezone('Europe/Rome'))
+        end = datetime.datetime(2025, 12, 31).astimezone(pytz.timezone('Europe/Rome'))
+
+        sbr_handler = SBRMeteo(timezone = 'Europe/Rome', username = user, password = password, chunk_size_days = 7)
+        async with sbr_handler as meteo_handler:
+
+            st_info = await meteo_handler.get_station_info("103")
+            print(st_info)
+
+            data = await meteo_handler.run(
+                station_id = '103',
+                start = start,
+                end = end,
+            )
+        print(data)
+        return data
+
+    data = asyncio.run(run_test())
