@@ -1,7 +1,13 @@
+import asyncio
+import httpx
+
 from abc import ABC, abstractmethod
 import pandas as pd
 import pandera.pandas as pa
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Tuple
+import logging
+
+logger = logging.getLogger(__name__)
 
 class BaseMeteoHandler(ABC):
     """
@@ -10,6 +16,33 @@ class BaseMeteoHandler(ABC):
     This class defines the interface for retrieving, processing, and validating
     meteorological data from various sources.
     """
+
+    def __init__(
+        self, 
+        timezone, 
+        chunk_size_days: int = 365, 
+        timeout: int = 20, 
+        max_concurrent_requests: int = 5,
+        sleep_time: int = 1,
+        **kwargs
+        ):
+        
+        self.timezone = timezone
+        self.chunk_size_days = chunk_size_days
+        self.timeout = timeout
+        self.max_concurrent_requests = max_concurrent_requests
+
+        if max_concurrent_requests < 1:
+            raise ValueError(f"max concurrent requests should be greater than 0. Got {max_concurrent_requests}")
+
+        self.sleep_time = sleep_time
+        
+        self._semaphore = asyncio.Semaphore(self.max_concurrent_requests)
+        self.station_info = None
+        self._station_info_lock = asyncio.Lock()
+        self.station_sensors = {}
+        self._station_sensors_locks: dict[str, asyncio.Lock] = {}
+        self._client = None
 
     @property
     @abstractmethod
@@ -23,21 +56,45 @@ class BaseMeteoHandler(ABC):
         """Return string indicating if query calls to the provider are left or right inclusive or both. Must be one of 'left', 'right' or 'both'."""
         pass
 
-    @abstractmethod
     def __enter__(self):
         """Enter context management."""
-        return self
+        raise ValueError("MeteoHandlers have to be used in an asyncronous context. Use async with...")
 
-    @abstractmethod
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Exit context management."""
+        raise ValueError("MeteoHandlers have to be used in an asyncronous context. Use async with...")
+
+    async def __aenter__(self):
+        """Start httpx client that is reused across requests"""
+        logger.info("Opening API session...")
+        self._client = httpx.AsyncClient(timeout = self.timeout)
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Start httpx client that is reused across requests"""
+        logger.info("Closing API session...")
+        if self._client is not None:
+            await self._client.aclose()
+
+    @abstractmethod
+    async def get_sensors(self, station_id: str) -> list[str]:
+        """
+        Get a list of available sensors for a station
+        """
         pass
 
     @abstractmethod
-    def get_station_info(self, station_id: str) -> Dict[str, Any]:
+    async def get_stations(self) -> list[str]:
+        """
+        Get a list of available station ids
+        """
+        pass
+
+    @abstractmethod
+    async def get_station_info(self, station_id: str | None) -> Dict[str, Any]:
         """
         Query information for a given station from the source, 
-        such as elevation, latitude or longitude.
+        such as elevation, latitude or longitude. Query for all stations if no station is given.
 
         Args:
             station_id (str): The unique identifier for the station.
@@ -48,20 +105,18 @@ class BaseMeteoHandler(ABC):
         pass
 
     @abstractmethod
-    def get_data(self, **kwargs) -> pd.DataFrame:
+    async def get_raw_data(self, **kwargs) -> Tuple[pd.DataFrame | None, Dict]:
         """
         Query the raw data from the source.
         
         Args:
             **kwargs: Parameters for data retrieval
             
-        Returns:
-            Any: Raw data from the source
         """
         pass
 
     @abstractmethod
-    def transform(self, raw_data: Any) -> pd.DataFrame:
+    def transform(self, raw_data: pd.DataFrame | None) -> pd.DataFrame | None:
         """
         Transform the raw data into a standardized format.
         
@@ -126,7 +181,7 @@ class BaseMeteoHandler(ABC):
         """
         return self.output_schema.validate(transformed_data)
 
-    def run(self, drop_columns = False, **kwargs) -> pd.DataFrame:
+    async def run(self, drop_columns = False, **kwargs) -> pd.DataFrame | None:
         """
         Run the complete data processing pipeline.
         
@@ -142,7 +197,11 @@ class BaseMeteoHandler(ABC):
         Returns:
             pd.DataFrame: Processed and validated data
         """
-        raw_data = self.get_data(**kwargs)
+        raw_data, _ = await self.get_raw_data(**kwargs)
+
+        if raw_data is None:
+            return None
+
         transformed_data = self.transform(raw_data)
         validated_data = self.validate(transformed_data)
 
