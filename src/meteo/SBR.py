@@ -37,6 +37,8 @@ SBR_RENAME = {
         "rainStart": "rain_start"
 }
 
+_QUEUE_SENTINEL = object()
+
 class SBRMeteo(BaseMeteoHandler):
     """
     A class to interact with the SBR (Beratungsring) website for retrieving weather station data.
@@ -161,10 +163,27 @@ class SBRMeteo(BaseMeteoHandler):
             return []
         return list(self.station_info.keys())
 
-    async def get_sensors(self):
+    async def get_sensors(self, station_id: str):
         return list(SBR_RENAME.keys())
 
-    async def _create_request_task(
+    async def _worker(self, queue: asyncio.Queue, results: list[pd.DataFrame]):
+        while True:
+            item = await queue.get()
+            if item is _QUEUE_SENTINEL:
+                queue.task_done()
+                break
+            
+            try:
+                if item['success']:
+                    rows = self._extract_data_from_response(item['data'])
+                    if rows:
+                        results.append(self._get_formatted_tbl(rows))
+            except Exception as e:
+                logger.error(f"Error extracting data: {e}", exc_info=True)
+            finally:
+                queue.task_done()
+
+    async def _request_data(
         self, station_id: str, date_range: Tuple[datetime, datetime], data_type
         ):
 
@@ -194,10 +213,25 @@ class SBRMeteo(BaseMeteoHandler):
                 response.raise_for_status()
                 await asyncio.sleep(self.sleep_time)
             
-            return response.text
+            return {'success': True, 'data': response.text}
         except Exception as e:
             logger.error(f"Error fetching data for {start_date} - {end_date}: {e}", exc_info = True)
-            return None
+            return {'success': False, 'data': None}
+
+    async def _producer(
+        self,
+        queue: asyncio.Queue,
+        station_id: int,
+        dates_split: list[Tuple[datetime.datetime, datetime.datetime]],
+        data_type: str,
+    ):
+        tasks = [
+            asyncio.create_task(self._request_data(station_id, date_range, data_type))
+            for date_range in dates_split
+        ]
+        for task in asyncio.as_completed(tasks):
+            result = await task
+            await queue.put(result)
 
     async def get_raw_data(
             self,
@@ -206,7 +240,7 @@ class SBRMeteo(BaseMeteoHandler):
             end: datetime.datetime,
             data_type: str = 'meteo',
             **kwargs
-        ) -> Tuple[List[str] | None, Dict[str, Any]]:
+        ) -> Tuple[pd.DataFrame | None, Dict[str, Any]]:
         """
         Query the raw data from the SBR website.
 
@@ -233,6 +267,7 @@ class SBRMeteo(BaseMeteoHandler):
 
         start = start.astimezone(pytz.timezone(self.timezone))
         end = end.astimezone(pytz.timezone(self.timezone))
+        queue = asyncio.Queue(maxsize = self.max_concurrent_requests)
         
         if isinstance(station_id, str):
             station_id = int(station_id)
@@ -240,22 +275,32 @@ class SBRMeteo(BaseMeteoHandler):
             raise ValueError(f'End date must be after start date. Got {start} - {end}')
 
         dates_split = split_dates(start, end, freq = self.freq, n_days=self.chunk_size_days)
-        
-        request_tasks = []
-        for date_range in dates_split:
-            request_tasks.append(self._create_request_task(station_id, date_range, data_type))
 
-        raw_responses = await asyncio.gather(*request_tasks)
-        raw_responses = [i for i in raw_responses if i is not None]
+        # Start workers
+        raw_responses = []
+        worker_count = max(int(self.max_concurrent_requests/2), 1)
+        workers = [asyncio.create_task(self._worker(queue, results = raw_responses)) for _ in range(worker_count)]
+        
+        producer = asyncio.create_task(
+            self._producer(queue, station_id, dates_split, data_type)
+        )
+
+        await producer
+        await queue.join()
+        
+        # Stop workers
+        for _ in range(worker_count):
+            await queue.put(_QUEUE_SENTINEL)
+        await asyncio.gather(*workers)
 
         st_metadata = await self.get_station_info(station_id)
         if len(raw_responses) > 0:
-            return raw_responses, st_metadata
+            return pd.concat(raw_responses, ignore_index = True), st_metadata
         else:
             logger.warning(f"No data could be fetched for station {station_id}")
             return None, st_metadata
 
-    def transform(self, raw_data: List[str] | None) -> pd.DataFrame:
+    def transform(self, raw_data: pd.DataFrame | None) -> pd.DataFrame | None:
         """
         Transform the raw HTML responses into a standardized DataFrame format.
         
@@ -266,30 +311,14 @@ class SBRMeteo(BaseMeteoHandler):
             pd.DataFrame: Transformed data in standardized format
         """
         if raw_data is None:
-            return pd.DataFrame()
+            return None
             
-        dataframes = []
-        for response_text in raw_data:
-            try:
-                rows = self._extract_data_from_response(response_text)
-                if rows:  # Only process if we have data
-                    df = self._get_formatted_tbl(rows)
-                    dataframes.append(df)
-            except Exception as e:
-                logger.error(f"Error extracting response data from html: {e}", exc_info = True)
-        
-        if not dataframes:
-            logger.warning("No data could be extracted from response text")
-            return pd.DataFrame()
-
-        sbr_data = pd.concat(dataframes, ignore_index=True)
-
         ## Drop unnecessary columns
         for col_drop in self._DROP_COLUMNS:
-            if col_drop in sbr_data.columns:
-                sbr_data.drop(columns = col_drop, inplace = True)
+            if col_drop in raw_data.columns:
+                raw_data.drop(columns = col_drop, inplace = True)
             
-        return sbr_data.rename(columns = SBR_RENAME)
+        return raw_data.rename(columns = SBR_RENAME)
 
     def _extract_data_from_response(
         self,
