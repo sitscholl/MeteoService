@@ -1,88 +1,26 @@
 import pandas as pd
-from pandas.tseries.frequencies import to_offset
 
 import logging
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Optional, Tuple
 
 from .database.db import MeteoDB
 from .provider_manager import ProviderManager
-from .utils import derive_datetime_gaps
+from .gapfinder import Gapfinder
 
 logger = logging.getLogger(__name__)
 
 class QueryManager:
     """Orchestrates data fetching from database and external providers."""
     
-    def __init__(self, config: dict[str, Any], provider_manager: ProviderManager = None):
-        """Initialize DataManager with configuration."""
-        self.config = config
-        self.provider_manager = provider_manager
-
-        
-    def _find_data_gaps(
-        self,
-        existing_data: pd.DataFrame,
-        start_time: datetime,
-        end_time: datetime,
-        freq: str,
-        inclusive: str = 'both',
-        min_gap_duration: str = '30min'
-    ) -> List[Tuple[datetime, datetime]]:
-        """Find gaps in the database data for the requested time range."""
-        try:
-            freq_offset = to_offset(freq)
-            min_gap_duration = pd.Timedelta(min_gap_duration)
-            freq_delta = pd.Timedelta(freq_offset)
-
-            start_time_aligned = pd.Timestamp(start_time).floor(freq)
-            end_time_aligned = pd.Timestamp(end_time).floor(freq)
-
-            complete_ts = pd.date_range(
-                start=start_time_aligned,
-                end=end_time_aligned,
-                freq=freq,
-                inclusive=inclusive
-            )
-
-            if complete_ts.empty:
-                return []
-
-            if existing_data.empty:
-                return [(complete_ts[0], complete_ts[-1])]
-
-            existing_index = existing_data.index
-            if existing_index.tz is None:
-                existing_index = existing_index.tz_localize('UTC')
-
-            target_tz = start_time.tzinfo or timezone.utc
-            if existing_index.tz != target_tz:
-                existing_index = existing_index.tz_convert(target_tz)
-
-            existing_index = existing_index.sort_values().unique()
-            missing_ts = complete_ts.difference(existing_index)
-
-            if missing_ts.empty:
-                return []
-
-            gaps = []
-            for gap_start, gap_end in derive_datetime_gaps(missing_ts.tolist(), freq=freq):
-                coverage = (pd.Timestamp(gap_end) + freq_delta) - pd.Timestamp(gap_start)
-                if coverage >= min_gap_duration:
-                    gaps.append((gap_start, gap_end))
-
-            return gaps
-
-        except Exception as e:
-            logger.error(f"Error finding data gaps: {e}")
-            return [(start_time, end_time)]  # Return full range as gap on error
-    
+    def __init__(self):
+        pass
+            
     def _fetch_missing_data(
         self,
-        provider_name: str,
+        provider_manager: ProviderManager,
         station_id: str,
         gaps: List[Tuple[datetime, datetime]],
-        freq: str,
         all_variables: List[str]
     ) -> pd.DataFrame:
         """Fetch and align missing data from the specified provider. Also makes sure that missing timestamps are included by filling with NA"""
@@ -93,22 +31,17 @@ class QueryManager:
             logger.warning("No provider_manager initialized for query_manager. Cannot fetch missing data")
             return pd.DataFrame()
 
-        provider = self.provider_manager.get_provider(provider_name.lower())
-        if provider is None:
-            logger.info(f"No provider available for provider: {provider_name}. Missing data cannot be requested.")
-            return pd.DataFrame()
-
         all_data: list[pd.DataFrame] = []
         n = len(gaps)
 
         try:
-            with provider:
+            async with provider_manager as prv:
                 for i, (start_gap, end_gap) in enumerate(gaps):
 
                     gap_index = pd.date_range(
                         start=pd.Timestamp(start_gap),
                         end=pd.Timestamp(end_gap),
-                        freq=freq,
+                        freq=prv.freq,
                         inclusive='both'
                     )
 
@@ -117,13 +50,13 @@ class QueryManager:
                     
                     logger.debug(f"Fetching data gap from {start_gap} to {end_gap} ")
 
-                    provider_inclusion = provider.inclusive
+                    provider_inclusion = prv.inclusive
                     if provider_inclusion == 'left' and i == n - 1:
-                        end_gap = end_gap + pd.Timedelta(freq)
+                        end_gap = end_gap + pd.Timedelta(prv.freq)
                     if provider_inclusion == 'right' and i == 0:
-                        start_gap = start_gap - pd.Timedelta(freq)
+                        start_gap = start_gap - pd.Timedelta(prv.freq)
                     
-                    provider_data = provider.run(
+                    provider_data = prv.get_data(
                         start=start_gap,
                         end=end_gap,
                         data_type='meteo',
@@ -158,7 +91,7 @@ class QueryManager:
                     all_data.append(provider_data)
         
         except Exception as e:
-            logger.error(f"Error fetching data from {provider_name}: {e}")
+            logger.error(f"Error fetching data from {provider_manager.name}: {e}")
             return pd.DataFrame()
         
         if all_data:
@@ -171,7 +104,7 @@ class QueryManager:
     def get_data(
             self, 
             db: MeteoDB, 
-            provider: str, 
+            provider_manager: ProviderManager, 
             station_id: str,
             start_time: datetime,
             end_time: datetime, 
@@ -211,12 +144,6 @@ class QueryManager:
         if not isinstance(station_id, str):
             station_id = str(station_id)
 
-        provider_handler = self.provider_manager.get_provider(provider.lower())
-        if provider_handler is None:
-            raise ValueError(f"No provider configured for '{provider}'. Available providers: {self.provider_manager.list_providers()}")
-
-        provider_freq = provider_handler.freq
-
         # Convert to UTC
         orig_timezone = start_time.tzinfo
         start_time_utc = start_time.astimezone(timezone.utc)
@@ -225,13 +152,13 @@ class QueryManager:
 
         # Round timestamps
         # Floor the start to ensure we cover the interval
-        start_time_round = pd.Timestamp(start_time_utc).floor(provider_freq)
+        start_time_round = pd.Timestamp(start_time_utc).floor(provider_manager.freq)
         
         # Floor the end to ensure we only query complete timestamps
-        end_time_round = pd.Timestamp(end_time_utc).floor(provider_freq)
+        end_time_round = pd.Timestamp(end_time_utc).floor(provider_manager.freq)
         
         # Ensure we don't query the future
-        now_floor = pd.Timestamp(now_utc).floor(provider_freq)
+        now_floor = pd.Timestamp(now_utc).floor(provider_manager.freq)
         if end_time_round > now_floor:
             logger.warning(f"Requested end time is in the future. Capping at {now_floor} (UTC)")
             end_time_round = now_floor
@@ -240,11 +167,11 @@ class QueryManager:
             # Handle cases where the range is smaller than the frequency
             return pd.DataFrame() 
 
-        logger.info(f"Querying data from {start_time_round} (UTC) to {end_time_round} (UTC) with frequency {provider_freq} and provider {provider}")
+        logger.info(f"Querying data from {start_time_round} (UTC) to {end_time_round} (UTC) with frequency {provider_manager.freq} and provider {provider_manager.name}")
 
         # First, get existing data from database
         existing_data = db.query_data(
-            provider=provider,
+            provider=provider_manager.name,
             station_id=station_id,
             start_time=start_time_round,
             end_time=end_time_round,
@@ -255,7 +182,8 @@ class QueryManager:
             logger.info(f"Found existing data ranging from {existing_data.index.min()} to {existing_data.index.max()}")
                         
         # Find gaps in the data
-        gaps = self._find_data_gaps(existing_data, start_time_round, end_time_round, freq = provider_freq)
+        ##TODO: Gapfinder for now directly called, wire in better
+        gaps = Gapfinder().find_data_gaps(existing_data, start_time_round, end_time_round, freq = provider_manager.freq)
         
         if not gaps:
             logger.info("No data gaps found")
@@ -268,21 +196,20 @@ class QueryManager:
         
         # Fetch missing data
         new_data = self._fetch_missing_data(
-            provider_name=provider,
+            provider_manager=provider_manager,
             station_id=station_id,
             gaps=gaps,
-            freq=provider_freq,
             all_variables = [] if existing_data.empty else [i for i in existing_data.columns if i not in {'station_id', 'datetime'}]
         )
         
         if not new_data.empty:
             try:
                 # Save new data to database
-                db.insert_data(new_data, provider)
+                db.insert_data(new_data, provider_manager.name)
                 
                 # Re-query database to get complete dataset
                 complete_data = db.query_data(
-                    provider=provider,
+                    provider=provider_manager.name,
                     station_id=station_id,
                     start_time=start_time_round,
                     end_time=end_time_round,
