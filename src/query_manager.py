@@ -105,7 +105,7 @@ class QueryManager:
             start_time: datetime,
             end_time: datetime, 
             variables: Optional[List[str]] = None
-        ) -> pd.DataFrame:
+        ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Get data from database and fetch missing data from providers if needed.
 
@@ -115,9 +115,6 @@ class QueryManager:
             start_time: Start time for data query (must be timezone-aware)
             end_time: End time for data query (must be timezone-aware)
             variables: Optional list of variables to return
-
-        Returns:
-            Complete dataset combining database and newly fetched data
         """
 
         #Filtering by variables needs more sophisticated data-gap check
@@ -137,7 +134,7 @@ class QueryManager:
         start_time_round, end_time_round = self._round_range_to_freq(start_time_utc, end_time_utc, freq = provider_handler.freq)
         if start_time_round >= end_time_round:
             # Handle cases where the range is smaller than the frequency
-            return pd.DataFrame() 
+            return pd.DataFrame(), pd.DataFrame()
 
         logger.info(
             f"Querying data from {start_time_round} (UTC) to {end_time_round} (UTC) with frequency {provider_handler.freq} and provider {provider_handler.name}"
@@ -156,14 +153,14 @@ class QueryManager:
             logger.info(f"Found existing data ranging from {existing_data.index.min()} to {existing_data.index.max()}")
                         
         # Find gaps in the data
-        dt_index = existing_data.index or pd.DatetimeIndex([])
+        dt_index = existing_data.index if isinstance(existing_data.index, pd.DatetimeIndex) else pd.DatetimeIndex([])
         gaps = self.gapfinder.find_data_gaps(dt_index, start_time_round, end_time_round, freq = provider_handler.freq)
         
         if not gaps:
             logger.info("No data gaps found")
             if not existing_data.empty:
                 existing_data.index = existing_data.index.tz_convert(orig_timezone)
-            return existing_data
+            return existing_data, pd.DataFrame()
         else:
             for (start_gap, end_gap) in gaps:
                 logger.debug(f"Data gap found: {start_gap} - {end_gap}")
@@ -179,36 +176,10 @@ class QueryManager:
         if new_data.empty:
             if not existing_data.empty:
                 existing_data.index = existing_data.index.tz_convert(orig_timezone)
-            return existing_data
-        
-        try:
-            # Save new data to database
-            db.insert_data(new_data, provider_handler.name)
-            
-            # Re-query database to get complete dataset
-            complete_data = db.query_data(
-                provider=provider_handler.name,
-                station_id=station_id,
-                start_time=start_time_round,
-                end_time=end_time_round,
-                variables=variables
-            )
-            complete_data.index = complete_data.index.tz_convert(orig_timezone)
-            return complete_data
-            
-        except Exception as e:
-            logger.error(f"Error saving new data to database: {e}")
+            return existing_data, pd.DataFrame()
 
-            # Return combination of existing and new data
-            new_data_indexed = new_data.set_index('datetime').sort_index()
-            new_data_indexed.index = new_data_indexed.index.tz_convert(orig_timezone)
-
-            if not existing_data.empty:
-                combined_data = pd.concat([existing_data.sort_index(), new_data_indexed])
-                combined_data = combined_data[~combined_data.index.duplicated(keep='last')]
-                return combined_data
-
-            return new_data_indexed
+        combined = self._combine_existing_and_new(existing_data, new_data, orig_timezone)
+        return combined, new_data
        
     @staticmethod
     def _validate_query_times(start_time, end_time):
@@ -240,3 +211,18 @@ class QueryManager:
             end_time_round = now_floor
 
         return start_time_round, end_time_round
+
+    @staticmethod
+    def _combine_existing_and_new(existing_data: pd.DataFrame, new_data: pd.DataFrame, target_tz) -> pd.DataFrame:
+        new_data_indexed = new_data.set_index('datetime').sort_index()
+        if new_data_indexed.index.tz is None:
+            new_data_indexed.index = new_data_indexed.index.tz_localize(timezone.utc)
+        new_data_indexed.index = new_data_indexed.index.tz_convert(target_tz)
+
+        if existing_data.empty:
+            return new_data_indexed
+
+        existing_sorted = existing_data.sort_index()
+        combined = pd.concat([existing_sorted, new_data_indexed])
+        combined = combined[~combined.index.duplicated(keep='last')]
+        return combined

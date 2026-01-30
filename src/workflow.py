@@ -9,14 +9,18 @@ class QueryWorkflow:
     def __init__(self, runtime: RuntimeContext):
         self.runtime = runtime
 
-    async def run_timeseries_query(self, query: TimeseriesQuery) -> TimeseriesResponse:
+    async def run_timeseries_query(
+        self,
+        query: TimeseriesQuery,
+    ):
 
         if query.start_time >= query.end_time:
             raise HTTPException(status_code=400, detail="start_time must be before end_time")
 
-        df = self.runtime.query_manager.get_data(
+        provider_handler = self.runtime.provider_manager.get_provider(query.provider)
+        df, pending = self.runtime.query_manager.get_data(
             db=self.runtime.db,
-            provider=self.runtime.provider_manager.get_provider(query.provider),
+            provider_handler=provider_handler,
             station_id=query.station_id,
             start_time=query.start_time,
             end_time=query.end_time,
@@ -41,12 +45,13 @@ class QueryWorkflow:
             }
 
         if df.empty:
-            return TimeseriesResponse(
+            response = TimeseriesResponse(
                 data=[],
                 count=0,
                 time_range={"start": query.start_time, "end": query.end_time},
                 metadata=query_metadata,
             )
+            return (response, pending)
 
         data = []
         for timestamp, row in df.iterrows():
@@ -60,10 +65,11 @@ class QueryWorkflow:
 
         query_metadata['result_timezone'] = str(getattr(df.index, "tz", None))
 
-        return TimeseriesResponse(
+        response = TimeseriesResponse(
             data=data,
             count=len(data),
             time_range={"start": df.index.min(), "end": df.index.max()},
             metadata=query_metadata,
         )
+        return (response, pending)
 

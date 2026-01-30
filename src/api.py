@@ -3,7 +3,7 @@ FastAPI integration example for the MeteoDB timeseries database.
 This demonstrates how to expose the database via REST API for fast access to cached meteo data.
 """
 
-from fastapi import FastAPI, HTTPException, Depends, Query
+from fastapi import FastAPI, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import JSONResponse
 
 from datetime import datetime
@@ -85,10 +85,14 @@ async def get_providers():
 @app.post("/query", response_model=TimeseriesResponse)
 async def query_timeseries(
     query: TimeseriesQuery,
+    background_tasks: BackgroundTasks,
     workflow: QueryWorkflow = Depends(get_workflow),
 ):
     try:
-        return await workflow.run_timeseries_query(query)
+        response, pending = await workflow.run_timeseries_query(query)
+        if pending is not None and not pending.empty:
+            background_tasks.add_task(runtime.db.insert_data, pending, query.provider)
+        return response
     except HTTPException:
         raise
     except Exception as e:
@@ -97,6 +101,7 @@ async def query_timeseries(
 
 @app.get("/query", response_model=TimeseriesResponse)
 async def query_timeseries_get(
+        background_tasks: BackgroundTasks,
         provider: str = Query(..., description="Provider name, e.g., 'SBR'"),
         station_id: str = Query(..., description="External station id"),
         start_date: datetime = Query(..., description="ISO datetime; e.g. 2025-01-15T10:30:00Z"),
@@ -128,7 +133,10 @@ async def query_timeseries_get(
         raise HTTPException(status_code=400, detail=str(e))
 
     try:
-        return await workflow.run_timeseries_query(q)
+        response, pending = await workflow.run_timeseries_query(q)
+        if pending is not None and not pending.empty:
+            background_tasks.add_task(runtime.db.insert_data, pending, provider)
+        return response
     except HTTPException:
         raise
     except Exception as e:
