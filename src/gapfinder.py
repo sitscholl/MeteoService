@@ -3,7 +3,7 @@ from pandas.tseries.frequencies import to_offset
 from pandas.api.types import is_datetime64_any_dtype
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 
 from typing import List, Tuple
 
@@ -40,19 +40,29 @@ class Gapfinder:
         end: datetime,
         freq: str,
         inclusive: str = 'both',
-        min_gap_duration: str = '30min'
+        min_gap_duration: str = '30min',
+        tz: str | tzinfo | None = None
     ) -> List[Tuple[datetime, datetime]]:
 
         """Find gaps in existing data for the requested time range."""
 
         if not is_datetime64_any_dtype(existing_dates):
-            raise ValueError("Existing dates must be a pandas Series of datetime type")
+            raise ValueError("Existing dates must be datetime-like")
 
         if not isinstance(existing_dates, pd.DatetimeIndex):
             raise ValueError(f"Existing dates must be a pandas DatetimeIndex. Got {type(existing_dates)}")
 
+        if start.tzinfo is None or end.tzinfo is None:
+            if tz is None:
+                raise ValueError("Naive start/end datetimes are not allowed without an explicit timezone")
+            start = pd.Timestamp(start).tz_localize(tz).to_pydatetime()
+            end = pd.Timestamp(end).tz_localize(tz).to_pydatetime()
+
         if start.tzinfo != end.tzinfo:
             raise ValueError(f"start and end must be in the same timezone. Got {start.tzinfo} vs {end.tzinfo}")
+
+        if end < start:
+            raise ValueError(f"end must be >= start. Got {end} < {start}")
 
         try:
             min_gap_duration = pd.Timedelta(min_gap_duration)
@@ -67,7 +77,9 @@ class Gapfinder:
                 return [(complete_ts[0], complete_ts[-1])]
 
             if existing_dates.tz is None:
-                existing_dates = existing_dates.tz_localize('UTC')
+                if tz is None:
+                    raise ValueError("Naive existing_dates are not allowed without an explicit timezone")
+                existing_dates = existing_dates.tz_localize(tz)
 
             target_tz = start.tzinfo or timezone.utc
             if existing_dates.tz != target_tz:
@@ -89,8 +101,8 @@ class Gapfinder:
 
             return gaps
 
-        except Exception as e:
-            logger.error(f"Error finding data gaps: {e}")
+        except Exception:
+            logger.exception("Error finding data gaps")
             return [(start, end)]  # Return full range as gap on error
 
     def derive_datetime_gaps(self, timestamps: list[datetime] | None, freq: str):
