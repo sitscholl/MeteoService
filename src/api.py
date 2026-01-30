@@ -77,26 +77,10 @@ async def health_check():
 async def get_providers():
     """Get list of available providers."""
     try:
-        return runtime.db.get_providers()
+        return runtime.provider_manager.list_providers()
     except Exception as e:
         logger.error(f"Failed to get providers: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve providers")
-
-@app.get("/providers/{provider}/stations")
-async def get_provider_stations(
-    provider: str,
-):
-    """Get available stations for a specific provider."""
-    try:
-        provider_stations = runtime.db.query_station(provider = provider)
-        if not provider_stations:
-            raise HTTPException(status_code=404, detail=f"No stations for provider '{provider}' found")
-        return provider_stations
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get stations for {provider}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve stations")
 
 @app.post("/query", response_model=TimeseriesResponse)
 async def query_timeseries(
@@ -131,12 +115,7 @@ async def query_timeseries_get(
     if variables and len(variables) == 1 and "," in variables[0]:
         variables = [v.strip() for v in variables[0].split(",") if v.strip()]
 
-    # Reuse your Pydantic validator logic (timezone localization, checks, etc.)
     try:
-        # Validate timezone value proactively (optional - Pydantic will also catch)
-        if timezone:
-            pytz.timezone(timezone)  # will raise UnknownTimeZoneError if invalid
-
         q = TimeseriesQuery(
             provider=provider,
             station_id=station_id,
