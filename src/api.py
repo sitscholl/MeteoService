@@ -11,6 +11,7 @@ from typing import Optional, List, Dict
 import pytz
 import logging
 
+from . import validation as validation_module
 from .validation import TimeseriesResponse, TimeseriesQuery
 from .runtime import RuntimeContext
 from .workflow import QueryWorkflow
@@ -26,15 +27,18 @@ app = FastAPI(
 
 ## Initialize runtime context
 runtime = RuntimeContext.from_config_file("config/config.yaml")
+workflow = QueryWorkflow(runtime)
 
 # Default timezone for the API (can be overridden by client)
 DEFAULT_TIMEZONE = runtime.default_timezone
-
-runtime = RuntimeContext.from_config_file("config/config.yaml")
-workflow = QueryWorkflow(runtime)
+validation_module.DEFAULT_TIMEZONE = DEFAULT_TIMEZONE
 
 def get_workflow() -> QueryWorkflow:
     return workflow
+
+@app.on_event("shutdown")
+def shutdown_event():
+    runtime.db.close()
 
 # API Routes
 
@@ -56,10 +60,10 @@ async def root():
     }
 
 @app.get("/health")
-async def health_check(db: MeteoDB = Depends(get_db)):
+async def health_check():
     """Health check endpoint."""
     try:
-        stations = db.query_station()
+        stations = runtime.db.query_station()
         return {
             "status": "healthy",
             "station_count": len(stations),
@@ -70,10 +74,10 @@ async def health_check(db: MeteoDB = Depends(get_db)):
         raise HTTPException(status_code=503, detail="Database unavailable")
 
 @app.get("/providers", response_model=List[str])
-async def get_providers(db: MeteoDB = Depends(get_db)):
+async def get_providers():
     """Get list of available providers."""
     try:
-        return db.get_providers()
+        return runtime.db.get_providers()
     except Exception as e:
         logger.error(f"Failed to get providers: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve providers")
@@ -81,11 +85,10 @@ async def get_providers(db: MeteoDB = Depends(get_db)):
 @app.get("/providers/{provider}/stations")
 async def get_provider_stations(
     provider: str,
-    db: MeteoDB = Depends(get_db)
 ):
     """Get available stations for a specific provider."""
     try:
-        provider_stations = db.query_station(provider = provider)
+        provider_stations = runtime.db.query_station(provider = provider)
         if not provider_stations:
             raise HTTPException(status_code=404, detail=f"No stations for provider '{provider}' found")
         return provider_stations
@@ -130,7 +133,7 @@ async def query_timeseries_get(
 
     # Reuse your Pydantic validator logic (timezone localization, checks, etc.)
     try:
-        # Validate timezone value proactively (optional—Pydantic will also catch)
+        # Validate timezone value proactively (optional - Pydantic will also catch)
         if timezone:
             pytz.timezone(timezone)  # will raise UnknownTimeZoneError if invalid
 
@@ -140,7 +143,7 @@ async def query_timeseries_get(
             start_time=start_date,
             end_time=end_date,
             variables=variables,
-            timezone=timezone,
+            timezone=timezone or DEFAULT_TIMEZONE,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

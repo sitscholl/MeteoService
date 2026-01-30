@@ -1,5 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from contextlib import contextmanager
 import pandas as pd
 
 import logging
@@ -15,26 +16,42 @@ class MeteoDB:
     def __init__(self, engine: str = 'sqlite:///database.db', provider_manager: ProviderManager = None):
         self.engine = create_engine(engine)
         models.Base.metadata.create_all(self.engine)
-        self.session = sessionmaker(bind=self.engine, autocommit = False, autoflush = False)()
+        self.Session = sessionmaker(
+            bind=self.engine,
+            autocommit=False,
+            autoflush=False,
+            expire_on_commit=False,
+        )
         self.provider_manager = provider_manager
+    
+    @contextmanager
+    def session_scope(self):
+        session = self.Session()
+        try:
+            yield session
+        finally:
+            session.close()
 
     def get_providers(self):
-        query = self.session.query(models.Station.provider.distinct())
-        return query.all()
+        with self.session_scope() as session:
+            query = session.query(models.Station.provider.distinct())
+            return [row[0] for row in query.all()]
 
     def query_station(self, provider: str | None = None, external_id: str | None = None):
-        query = self.session.query(models.Station)
-        if provider is not None:
-            query = query.filter(models.Station.provider == provider)
-        if external_id is not None:
-            query = query.filter(models.Station.external_id == external_id)
-        return query.all()
+        with self.session_scope() as session:
+            query = session.query(models.Station)
+            if provider is not None:
+                query = query.filter(models.Station.provider == provider)
+            if external_id is not None:
+                query = query.filter(models.Station.external_id == external_id)
+            return query.all()
 
     def query_variable(self, name: str = None):
-        query = self.session.query(models.Variable)
-        if name is not None:
-            query = query.filter(models.Variable.name == name)
-        return query.all()
+        with self.session_scope() as session:
+            query = session.query(models.Variable)
+            if name is not None:
+                query = query.filter(models.Variable.name == name)
+            return query.all()
 
     def query_data(
             self,
@@ -49,37 +66,38 @@ class MeteoDB:
         start_time_utc = start_time.astimezone(timezone.utc)
         end_time_utc = end_time.astimezone(timezone.utc)
 
-        query = (
-            self.session.query(
-                models.Measurement.datetime.label("datetime"),
-                models.Measurement.value.label("value"),
-                models.Station.external_id.label("station_id"),
-                models.Variable.name.label("variable"),
-                models.Station.provider.label("provider"),
-            )
-            .join(models.Station, models.Measurement.station_id == models.Station.id)
-            .join(models.Variable, models.Measurement.variable_id == models.Variable.id)
-            .filter(
-                models.Station.provider == provider,
-                models.Station.external_id == station_id,
-                models.Measurement.datetime.between(start_time_utc, end_time_utc)
-            )
-        )
-
-        if variables is not None:
-            variables_ids = []
-            for v in variables:
-                variable_model = self.query_variable(v)
-                if not variable_model:
-                    logger.warning(f"Variable {v} not found in database")
-                    continue
-                variables_ids.append(variable_model[0].id)
-
-            query = query.filter(
-                models.Measurement.variable_id.in_(variables_ids)
+        with self.session_scope() as session:
+            query = (
+                session.query(
+                    models.Measurement.datetime.label("datetime"),
+                    models.Measurement.value.label("value"),
+                    models.Station.external_id.label("station_id"),
+                    models.Variable.name.label("variable"),
+                    models.Station.provider.label("provider"),
+                )
+                .join(models.Station, models.Measurement.station_id == models.Station.id)
+                .join(models.Variable, models.Measurement.variable_id == models.Variable.id)
+                .filter(
+                    models.Station.provider == provider,
+                    models.Station.external_id == station_id,
+                    models.Measurement.datetime.between(start_time_utc, end_time_utc)
+                )
             )
 
-        df = pd.read_sql_query(sql=query.statement, con=self.engine)
+            if variables is not None:
+                variables_ids = []
+                for v in variables:
+                    variable_model = self.query_variable(v)
+                    if not variable_model:
+                        logger.warning(f"Variable {v} not found in database")
+                        continue
+                    variables_ids.append(variable_model[0].id)
+
+                query = query.filter(
+                    models.Measurement.variable_id.in_(variables_ids)
+                )
+
+            df = pd.read_sql_query(sql=query.statement, con=self.engine)
 
         if not df.empty:
             try:
@@ -121,16 +139,20 @@ class MeteoDB:
         if station_info is None:
             station_info = kwargs
 
+        session = self.Session()
         try:
             new_station = models.Station(provider = provider, external_id = external_id, **station_info)
-            self.session.add(new_station)
-            self.session.commit()
+            session.add(new_station)
+            session.commit()
             logger.info(f"New station {new_station.external_id} inserted successfully.")
-            self.session.refresh(new_station)
+            session.refresh(new_station)
             return new_station
         except Exception as e:
+            session.rollback()
             logger.error(f"Error inserting new station: {e}")
             return
+        finally:
+            session.close()
 
     def insert_variable(self, name: str, unit: str | None = None, description: str | None = None):
         """
@@ -141,16 +163,20 @@ class MeteoDB:
         if existing_variable:
             return existing_variable[0]
 
+        session = self.Session()
         try:
             new_variable = models.Variable(name = name, unit = unit, description = description)
-            self.session.add(new_variable)
-            self.session.commit()
+            session.add(new_variable)
+            session.commit()
             logger.info(f"New variable {new_variable.name} inserted successfully.")
-            self.session.refresh(new_variable)
+            session.refresh(new_variable)
             return new_variable
         except Exception as e: 
+            session.rollback()
             logger.error(f"Error inserting new variable: {e}")
             return
+        finally:
+            session.close()
 
     def insert_data(
         self, 
@@ -263,23 +289,14 @@ class MeteoDB:
                 index_label=index_label,
                 if_exists=if_exists
             )
-            self.session.commit()
             logger.info(f"Successfully inserted {len(measurements)} measurement rows across {len(station_id_map)} stations and {len(active_variables)} variables.")
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Error inserting bulk measurement data: {e}")
                     
     def close(self):
         """
         Close the SQLAlchemy session and dispose of the engine connection pool.
         """
-        try:
-            if self.session:
-                self.session.close()
-                logger.debug("Database session closed.")
-        except Exception as e:
-            logger.warning(f"Error closing database session: {e}")
-
         try:
             if self.engine:
                 self.engine.dispose()

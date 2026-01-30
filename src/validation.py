@@ -4,6 +4,8 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 import pytz
 
+DEFAULT_TIMEZONE = "UTC"
+
 # Pydantic models for request/response
 class TimeseriesQuery(BaseModel):
     provider: str = Field(..., description="Provider name (e.g., 'SBR')")
