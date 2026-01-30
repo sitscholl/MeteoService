@@ -5,60 +5,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def derive_datetime_gaps(timestamps, freq):
-    """
-    Groups a list of timestamp objects into consecutive gaps based on the given frequency.
-
-    Parameters:
-        timestamps (list): A list of datetime objects representing the missing timestamps in a series.
-        freq (str): The frequency string (e.g., 'D', 'H', 'T') of the original timeseries.
-
-    Returns:
-        list: A list of tuples, where each tuple represents the start and end of a gap.
-              Each tuple contains Python datetime.datetime objects.
-    """
-
-    if not timestamps:
-        return []
-
-    # Normalize timestamps to pandas.Timestamp for reliable arithmetic/comparison
-    pd_timestamps = [pd.Timestamp(ts) for ts in timestamps]
-    pd_timestamps.sort()
-
-    # Convert frequency string to a Timedelta/offset
-    try:
-        offset = pd.tseries.frequencies.to_offset(freq)
-    except Exception as e:
-        raise ValueError(f"Invalid frequency '{freq}': {e}")
-    freq_delta = pd.Timedelta(offset)
-
-    gaps = []
-    gap_start = pd_timestamps[0]
-    gap_end = pd_timestamps[0]
-
-    for current_ts in pd_timestamps[1:]:
-        expected_next = gap_end + freq_delta
-        if current_ts == expected_next:
-            # consecutive, extend current gap
-            gap_end = current_ts
-        else:
-            # non-consecutive, close current gap and start a new one
-            gaps.append((gap_start.to_pydatetime(), gap_end.to_pydatetime()))
-            gap_start = current_ts
-            gap_end = current_ts
-
-    # append the final gap
-    gaps.append((gap_start.to_pydatetime(), gap_end.to_pydatetime()))
-    return gaps
-
-def validate_date(date, target_format = "%d.%m.%Y"):
-    ##Validate input dates
-    try:
-        if date != datetime.datetime.strptime(date, target_format).strftime(target_format):
-            raise ValueError
-    except ValueError:
-        raise ValueError(f'Start date needs to be in {target_format} format. Got {date}')
-
 def split_dates(start_date, end_date, freq, n_days=7, split_on_year=False):
     """
     freq: string (e.g., '1h', '15min') or pd.Timedelta
