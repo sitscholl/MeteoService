@@ -1,14 +1,12 @@
 # Configuration for meteorological data providers
 providers:
   sbr:
-    enabled: true
     class: src.meteo.SBR.SBRMeteo
     username: "user"
     password: "pwd"
     timezone: 'Europe/Rome'
     chunk_size_days: 7  # Size of chunks when fetching data
   province:
-    enabled: true
     class: src.meteo.province.ProvinceMeteo
     timezone: "Europe/Rome"
     chunk_size_days: 365  # Size of chunks when fetching data
