@@ -47,7 +47,7 @@ async def root():
     """Root endpoint with API information."""
     return {
         "message": "Meteorological Data API",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "docs": "/docs",
         "timezone_info": f"""
             default_timezone: {DEFAULT_TIMEZONE},
@@ -81,6 +81,18 @@ async def get_providers():
     except Exception as e:
         logger.error(f"Failed to get providers: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve providers")
+
+@app.get("/{provider}/stations", response_model=List[str])
+async def get_stations(provider: str):
+    """Get list of available stations for a given provider."""
+    try:
+        provider_handler = runtime.provider_manager.get_provider(provider.lower)
+        if provider_handler is None:
+            raise ValueError(f"Unknown provider {provider.lower()}. Check /providers endpoint for available providers.")
+        return await provider_handler.get_stations()
+    except Exception as e:
+        logger.error(f"Failed to get stations for provider {provider}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve stations")
 
 @app.post("/query", response_model=TimeseriesResponse)
 async def query_timeseries(
