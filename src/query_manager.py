@@ -14,8 +14,9 @@ logger = logging.getLogger(__name__)
 class QueryManager:
     """Orchestrates data fetching from database and external providers."""
     
-    def __init__(self):
+    def __init__(self, max_concurrent_requests: int = 3):
         self.gapfinder = Gapfinder()
+        self._semaphore = asyncio.Semaphore(max_concurrent_requests)
 
     async def _create_fetch_task(
         self,
@@ -23,8 +24,6 @@ class QueryManager:
         provider_handler: BaseMeteoHandler,
         start_gap: datetime,
         end_gap: datetime,
-        is_first: bool,
-        is_last: bool,
     ):
         try:
             gap_index = pd.date_range(
@@ -37,24 +36,19 @@ class QueryManager:
             if gap_index.empty:
                 return None, gap_index
 
-            logger.debug(f"Fetching data gap from {start_gap} to {end_gap} for {provider_handler.name}")
-
-            provider_inclusion = provider_handler.inclusive
-            if provider_inclusion == 'left' and is_last:
-                end_gap = end_gap + pd.Timedelta(provider_handler.freq)
-            if provider_inclusion == 'right' and is_first:
-                start_gap = start_gap - pd.Timedelta(provider_handler.freq)
+            logger.debug(f"Fetching data gap from {start_gap} to {end_gap} for {provider_handler.provider_name}")
             
-            provider_data = await provider_handler.run(
-                start=start_gap,
-                end=end_gap,
-                data_type='meteo',
-                station_id=station_id
-            )
+            async with self._semaphore:
+                provider_data = await provider_handler.run(
+                    start=start_gap,
+                    end=end_gap,
+                    data_type='meteo',
+                    station_id=station_id
+                )
 
             return provider_data, gap_index
         except Exception as e:
-            logger.exception(f"Error fetching data from {start_gap} to {end_gap} for {provider_handler.name}: {e}")
+            logger.exception(f"Error fetching data from {start_gap} to {end_gap} for {provider_handler.provider_name}: {e}")
             return None, None
             
     async def _fetch_missing_data(
@@ -75,10 +69,14 @@ class QueryManager:
             tasks = []
             task_meta: dict[asyncio.Task, tuple[datetime, datetime]] = {}
             for i, (start_gap, end_gap) in enumerate(gaps):
-                is_last = i == n - 1
-                is_first = i == 0
+                provider_inclusion = prv.inclusive
+                if provider_inclusion == 'left' and i == n - 1:
+                    end_gap = end_gap + pd.Timedelta(prv.freq)
+                if provider_inclusion == 'right' and i == 0:
+                    start_gap = start_gap - pd.Timedelta(prv.freq)
+                    
                 task = asyncio.create_task(
-                    self._create_fetch_task(station_id, prv, start_gap, end_gap, is_first, is_last)
+                    self._create_fetch_task(station_id, prv, start_gap, end_gap)
                 )
                 tasks.append(task)
                 task_meta[task] = (start_gap, end_gap)
@@ -134,10 +132,10 @@ class QueryManager:
                     start_gap, end_gap = task_meta.get(task, (None, None))
                     if start_gap is not None and end_gap is not None:
                         logger.exception(
-                            f"Error processing data for {start_gap} - {end_gap} from {provider_handler.name}: {e}"
+                            f"Error processing data for {start_gap} - {end_gap} from {provider_handler.provider_name}: {e}"
                         )
                     else:
-                        logger.exception(f"Error processing data from {provider_handler.name}: {e}")
+                        logger.exception(f"Error processing data from {provider_handler.provider_name}: {e}")
                     continue
         
         if all_data:
@@ -187,12 +185,12 @@ class QueryManager:
             return pd.DataFrame(), pd.DataFrame()
 
         logger.info(
-            f"Querying data from {start_time_round} (UTC) to {end_time_round} (UTC) with frequency {provider_handler.freq} and provider {provider_handler.name}"
+            f"Querying data from {start_time_round} (UTC) to {end_time_round} (UTC) with frequency {provider_handler.freq} and provider {provider_handler.provider_name}"
             )
 
         # Get existing data from database
         existing_data = db.query_data(
-            provider=provider_handler.name,
+            provider=provider_handler.provider_name,
             station_id=station_id,
             start_time=start_time_round,
             end_time=end_time_round,
