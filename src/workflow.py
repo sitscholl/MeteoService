@@ -18,7 +18,7 @@ class QueryWorkflow:
             raise HTTPException(status_code=400, detail="start_time must be before end_time")
 
         provider_handler = self.runtime.provider_manager.get_provider(query.provider)
-        df, pending = self.runtime.query_manager.get_data(
+        df, pending = await self.runtime.query_manager.get_data(
             db=self.runtime.db,
             provider_handler=provider_handler,
             station_id=query.station_id,
