@@ -126,12 +126,20 @@ class MeteoDB:
         try:
             async with provider_handler as prv:
                 station_info = await prv.get_station_info(external_id)
+                if station_info is None:
+                    station_info = {}
                 station_info.update(**kwargs)
         except Exception as e:
             logger.error(f"Error fetching station information: {e}")
 
         if station_info is None:
             station_info = kwargs
+        else:
+            station_info = station_info.copy()
+
+        # Keep only Station fields and avoid overriding identifiers.
+        allowed_fields = {"name", "latitude", "longitude", "elevation", "station_metadata"}
+        station_info = {k: v for k, v in station_info.items() if k in allowed_fields}
 
         session = self.Session()
         try:
