@@ -7,13 +7,13 @@ import logging
 from datetime import datetime, timezone
 
 from . import models
-from ..provider_manager import ProviderManager
+from ..meteo.base import BaseMeteoHandler
 
 logger = logging.getLogger(__name__)
 
 class MeteoDB:
 
-    def __init__(self, engine: str = 'sqlite:///database.db', provider_manager: ProviderManager = None):
+    def __init__(self, engine: str = 'sqlite:///database.db'):
         self.engine = create_engine(engine)
         models.Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(
@@ -22,7 +22,6 @@ class MeteoDB:
             autoflush=False,
             expire_on_commit=False,
         )
-        self.provider_manager = provider_manager
     
     @contextmanager
     def session_scope(self):
@@ -113,35 +112,30 @@ class MeteoDB:
 
         return df
 
-    def insert_station(self, provider: str, external_id: str, **kwargs):
+    async def insert_station(self, provider_handler: BaseMeteoHandler, external_id: str, **kwargs):
         """
         Get existing station if it already exists or create a new one.
         """
-        existing_station = self.query_station(provider=provider, external_id=external_id)
+        existing_station = self.query_station(provider=provider_handler.provider_name, external_id=external_id)
 
         if existing_station:
             return existing_station[0]
 
         #Fetch station information
         station_info = None
-        if self.provider_manager is None:
-            logger.info("ProviderManager is not initialized. Cannot fetch station info")
-        elif self.provider_manager.get_provider(provider.lower()) is None:
-            logger.warning(f"Provider handler for provider '{provider}' could not be found. Station metadata will not be fetched. Available providers: {self.provider_manager.list_providers()}")
-        else:
-            try:
-                with self.provider_manager.get_provider(provider.lower()) as provider_handler:
-                    station_info = provider_handler.get_station_info(external_id)
-                    station_info.update(**kwargs)
-            except Exception as e:
-                logger.error(f"Error fetching station information: {e}")
+        try:
+            async with provider_handler as prv:
+                station_info = await prv.get_station_info(external_id)
+                station_info.update(**kwargs)
+        except Exception as e:
+            logger.error(f"Error fetching station information: {e}")
 
         if station_info is None:
             station_info = kwargs
 
         session = self.Session()
         try:
-            new_station = models.Station(provider = provider, external_id = external_id, **station_info)
+            new_station = models.Station(provider = provider_handler.provider_name, external_id = external_id, **station_info)
             session.add(new_station)
             session.commit()
             logger.info(f"New station {new_station.external_id} inserted successfully.")
@@ -178,10 +172,10 @@ class MeteoDB:
         finally:
             session.close()
 
-    def insert_data(
+    async def insert_data(
         self, 
         data: pd.DataFrame, 
-        provider: str,
+        provider_handler: BaseMeteoHandler,
         index=False, index_label=None, if_exists='append'):
         """
         Insert measurement data into the database. All columns other than 'datetime' and 'station_id' are assumed to contain variables and will be inserted into the Measurement table.
@@ -218,7 +212,7 @@ class MeteoDB:
         # Ensure each referenced station exists once up front
         station_id_map: dict[str, int] = {}
         for st_id, station_group in df.groupby('station_id'):
-            station_entry = self.insert_station(provider, st_id)
+            station_entry = await self.insert_station(provider_handler, st_id)
             if station_entry is None:
                 logger.warning(f"Skipping insertion of data from {st_id} as station could not be inserted into database")
                 continue
@@ -305,42 +299,40 @@ class MeteoDB:
             logger.warning(f"Error disposing database engine: {e}")
 
 
-if __name__ == "__main__":
-    import numpy as np
-    from ..config import load_config
+# if __name__ == "__main__":
+    # import numpy as np
+    # from ..config import load_config
 
-    config = load_config('config/config.yaml')
+    # config = load_config('config/config.yaml')
 
-    # Create database instance
-    meteo_db = MeteoDB()
-    provider_manager = ProviderManager(provider_config = config['providers'])
-    meteo_db.initialize_provider_manager(provider_manager)
+    # # Create database instance
+    # meteo_db = MeteoDB()
 
-    # Example 2: Insert data with automatic station and variable creation
-    # Create sample data with external station IDs and variable names
-    df = pd.DataFrame({
-        'datetime': np.datetime64('2017-01-01') + np.array([np.timedelta64(i, 'D') for i in np.random.randint(0, 1000, size = 4)]),
-        'station_id': ['3', '3', '32', '32'],
-        "tair_2m": np.random.rand(4),                           # Temperature 2m8
-        "tsoil_25cm": np.random.rand(4),     # Soil temperature -25cm
-        "tdry_60cm": np.random.rand(4),           # Dry temperature 60cm
-        "twet_60cm": np.random.rand(4),           # Wet temperature
-        "relative_humidity": np.random.rand(4),           # Relative humidity
-        "wind_speed": np.random.rand(4), 
-    })
+    # # Example 2: Insert data with automatic station and variable creation
+    # # Create sample data with external station IDs and variable names
+    # df = pd.DataFrame({
+    #     'datetime': np.datetime64('2017-01-01') + np.array([np.timedelta64(i, 'D') for i in np.random.randint(0, 1000, size = 4)]),
+    #     'station_id': ['3', '3', '32', '32'],
+    #     "tair_2m": np.random.rand(4),                           # Temperature 2m8
+    #     "tsoil_25cm": np.random.rand(4),     # Soil temperature -25cm
+    #     "tdry_60cm": np.random.rand(4),           # Dry temperature 60cm
+    #     "twet_60cm": np.random.rand(4),           # Wet temperature
+    #     "relative_humidity": np.random.rand(4),           # Relative humidity
+    #     "wind_speed": np.random.rand(4), 
+    # })
 
-    # Insert data - stations and variables will be created automatically
-    meteo_db.insert_data(df, provider = 'SBR')
+    # # Insert data - stations and variables will be created automatically
+    # meteo_db.insert_data(df, provider = 'SBR')
 
-    # Query results
-    stations = meteo_db.query_station()
-    measurements = meteo_db.query_data()
+    # # Query results
+    # stations = meteo_db.query_station()
+    # measurements = meteo_db.query_data()
 
-    print("Stations:")
-    for station in stations:
-        print(f"  ID: {station.id}, Provider: {station.provider}, External ID: {station.external_id}, Name: {station.name}")
+    # print("Stations:")
+    # for station in stations:
+    #     print(f"  ID: {station.id}, Provider: {station.provider}, External ID: {station.external_id}, Name: {station.name}")
 
-    print(f"\nTotal measurements: {len(measurements)}")
+    # print(f"\nTotal measurements: {len(measurements)}")
 
     # # Example 3: Insert data with provider as parameter instead of column
     # df2 = pd.DataFrame({
