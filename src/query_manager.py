@@ -36,7 +36,7 @@ class QueryManager:
             if gap_index.empty:
                 return None, gap_index
 
-            logger.debug(f"Fetching data gap from {start_gap} to {end_gap} for {provider_handler.provider_name}")
+            logger.debug(f"Fetching data gap for station {station_id} (provider={provider_handler.provider_name}) from {start_gap:%Y-%m-%d %H:%M:%S} to {end_gap:%Y-%m-%d %H:%M:%S}")
             
             async with self._semaphore:
                 provider_data = await provider_handler.run(
@@ -185,7 +185,7 @@ class QueryManager:
             return pd.DataFrame(), pd.DataFrame()
 
         logger.info(
-            f"Querying data from {start_time_round} (UTC) to {end_time_round} (UTC) with frequency {provider_handler.freq} and provider {provider_handler.provider_name}"
+            f"Querying data for station {station_id} (provider={provider_handler.provider_name}) from {start_time_round:%Y-%m-%d %H:%M:%S} (UTC) to {end_time_round:%Y-%m-%d %H:%M:%S} (UTC) with frequency {provider_handler.freq}"
             )
 
         # Get existing data from database
@@ -211,7 +211,7 @@ class QueryManager:
             return existing_data, pd.DataFrame()
         else:
             for (start_gap, end_gap) in gaps:
-                logger.debug(f"Data gap found: {start_gap} - {end_gap}")
+                logger.debug(f"Data gap found: {start_gap:%Y-%m-%d %H:%M:%S} - {end_gap:%Y-%m-%d %H:%M:%S}")
         
         # Fetch missing data
         new_data = await self._fetch_missing_data(
