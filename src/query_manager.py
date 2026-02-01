@@ -24,6 +24,8 @@ class QueryManager:
         provider_handler: BaseMeteoHandler,
         start_gap: datetime,
         end_gap: datetime,
+        is_first: bool,
+        is_last: bool
     ):
         try:
             gap_index = pd.date_range(
@@ -35,9 +37,15 @@ class QueryManager:
 
             if gap_index.empty:
                 return None, gap_index
-
+            
             logger.debug(f"Fetching data gap for station {station_id} (provider={provider_handler.provider_name}) from {start_gap:%Y-%m-%d %H:%M:%S} to {end_gap:%Y-%m-%d %H:%M:%S}")
             
+            provider_inclusion = provider_handler.inclusive
+            if provider_inclusion == 'left' and is_last:
+                end_gap = end_gap + pd.Timedelta(provider_handler.freq)
+            if provider_inclusion == 'right' and is_first:
+                start_gap = start_gap - pd.Timedelta(provider_handler.freq)
+
             async with self._semaphore:
                 provider_data = await provider_handler.run(
                     start=start_gap,
@@ -69,14 +77,10 @@ class QueryManager:
             tasks = []
             task_meta: dict[asyncio.Task, tuple[datetime, datetime]] = {}
             for i, (start_gap, end_gap) in enumerate(gaps):
-                provider_inclusion = prv.inclusive
-                if provider_inclusion == 'left' and i == n - 1:
-                    end_gap = end_gap + pd.Timedelta(prv.freq)
-                if provider_inclusion == 'right' and i == 0:
-                    start_gap = start_gap - pd.Timedelta(prv.freq)
-                    
+                is_last = i == n - 1
+                is_first = i == 0            
                 task = asyncio.create_task(
-                    self._create_fetch_task(station_id, prv, start_gap, end_gap)
+                    self._create_fetch_task(station_id, prv, start_gap, end_gap, is_first, is_last)
                 )
                 tasks.append(task)
                 task_meta[task] = (start_gap, end_gap)
@@ -102,7 +106,7 @@ class QueryManager:
                         elif start_gap is not None and end_gap is not None:
                             logger.warning(f"No data returned for {start_gap} - {end_gap}")
                         else:
-                            logger.warning("No data returned for unknown gap range")
+                            logger.warning("No data returned from query")
 
                         if all_variables and len(gap_index) > 0:
                             placeholder = pd.DataFrame({
