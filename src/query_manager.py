@@ -3,6 +3,7 @@ import pandas as pd
 import logging
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
+import asyncio
 
 from .database.db import MeteoDB
 from .meteo.base import BaseMeteoHandler
@@ -15,8 +16,48 @@ class QueryManager:
     
     def __init__(self):
         self.gapfinder = Gapfinder()
+
+    async def _create_fetch_task(
+        self,
+        station_id: str,
+        provider_handler: BaseMeteoHandler,
+        start_gap: datetime,
+        end_gap: datetime,
+        is_first: bool,
+        is_last: bool,
+    ):
+        try:
+            gap_index = pd.date_range(
+                start=pd.Timestamp(start_gap),
+                end=pd.Timestamp(end_gap),
+                freq=provider_handler.freq,
+                inclusive='both'
+            )
+
+            if gap_index.empty:
+                return None, gap_index
+
+            logger.debug(f"Fetching data gap from {start_gap} to {end_gap} for {provider_handler.name}")
+
+            provider_inclusion = provider_handler.inclusive
+            if provider_inclusion == 'left' and is_last:
+                end_gap = end_gap + pd.Timedelta(provider_handler.freq)
+            if provider_inclusion == 'right' and is_first:
+                start_gap = start_gap - pd.Timedelta(provider_handler.freq)
             
-    def _fetch_missing_data(
+            provider_data = await provider_handler.run(
+                start=start_gap,
+                end=end_gap,
+                data_type='meteo',
+                station_id=station_id
+            )
+
+            return provider_data, gap_index
+        except Exception as e:
+            logger.exception(f"Error fetching data from {start_gap} to {end_gap} for {provider_handler.name}: {e}")
+            return None, None
+            
+    async def _fetch_missing_data(
         self,
         provider_handler: BaseMeteoHandler,
         station_id: str,
@@ -30,38 +71,42 @@ class QueryManager:
         
         all_data: list[pd.DataFrame] = []
         n = len(gaps)
-        try:
-            async with provider_handler as prv:
-                for i, (start_gap, end_gap) in enumerate(gaps):
+        async with provider_handler as prv:
+            tasks = []
+            task_meta: dict[asyncio.Task, tuple[datetime, datetime]] = {}
+            for i, (start_gap, end_gap) in enumerate(gaps):
+                is_last = i == n - 1
+                is_first = i == 0
+                task = asyncio.create_task(
+                    self._create_fetch_task(station_id, prv, start_gap, end_gap, is_first, is_last)
+                )
+                tasks.append(task)
+                task_meta[task] = (start_gap, end_gap)
 
-                    gap_index = pd.date_range(
-                        start=pd.Timestamp(start_gap),
-                        end=pd.Timestamp(end_gap),
-                        freq=prv.freq,
-                        inclusive='both'
-                    )
+            for task in asyncio.as_completed(tasks):
+                try:
+                    provider_data, gap_index = await task
+                    start_gap, end_gap = task_meta.get(task, (None, None))
+                    if gap_index is None:
+                        if start_gap is not None and end_gap is not None:
+                            gap_index = pd.date_range(
+                                start=pd.Timestamp(start_gap),
+                                end=pd.Timestamp(end_gap),
+                                freq=prv.freq,
+                                inclusive="both",
+                            )
+                        else:
+                            gap_index = pd.DatetimeIndex([])
 
-                    if gap_index.empty:
-                        continue
-                    
-                    logger.debug(f"Fetching data gap from {start_gap} to {end_gap} ")
+                    if provider_data is None or provider_data.empty:
+                        if len(gap_index) > 0:
+                            logger.warning(f"No data returned for {gap_index[0]} - {gap_index[-1]}")
+                        elif start_gap is not None and end_gap is not None:
+                            logger.warning(f"No data returned for {start_gap} - {end_gap}")
+                        else:
+                            logger.warning("No data returned for unknown gap range")
 
-                    provider_inclusion = prv.inclusive
-                    if provider_inclusion == 'left' and i == n - 1:
-                        end_gap = end_gap + pd.Timedelta(prv.freq)
-                    if provider_inclusion == 'right' and i == 0:
-                        start_gap = start_gap - pd.Timedelta(prv.freq)
-                    
-                    provider_data = prv.get_data(
-                        start=start_gap,
-                        end=end_gap,
-                        data_type='meteo',
-                        station_id=station_id
-                    )
-
-                    if provider_data.empty:
-                        logger.warning(f"No data returned for {start_gap} - {end_gap}")
-                        if all_variables:
+                        if all_variables and len(gap_index) > 0:
                             placeholder = pd.DataFrame({
                                 'datetime': gap_index,
                                 'station_id': station_id
@@ -85,10 +130,15 @@ class QueryManager:
                     provider_data.rename(columns={'index': 'datetime'}, inplace=True)
 
                     all_data.append(provider_data)
-        
-        except Exception as e:
-            logger.error(f"Error fetching data from {provider_handler.name}: {e}")
-            return pd.DataFrame()
+                except Exception as e:
+                    start_gap, end_gap = task_meta.get(task, (None, None))
+                    if start_gap is not None and end_gap is not None:
+                        logger.exception(
+                            f"Error processing data for {start_gap} - {end_gap} from {provider_handler.name}: {e}"
+                        )
+                    else:
+                        logger.exception(f"Error processing data from {provider_handler.name}: {e}")
+                    continue
         
         if all_data:
             result = pd.concat(all_data, ignore_index=True)
@@ -97,7 +147,7 @@ class QueryManager:
             return result
         return pd.DataFrame()
     
-    def get_data(
+    async def get_data(
             self, 
             db: MeteoDB, 
             provider_handler: BaseMeteoHandler, 
@@ -166,7 +216,7 @@ class QueryManager:
                 logger.debug(f"Data gap found: {start_gap} - {end_gap}")
         
         # Fetch missing data
-        new_data = self._fetch_missing_data(
+        new_data = await self._fetch_missing_data(
             provider_handler=provider_handler,
             station_id=station_id,
             gaps=gaps,
