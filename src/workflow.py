@@ -17,7 +17,11 @@ class QueryWorkflow:
         if query.start_time >= query.end_time:
             raise HTTPException(status_code=400, detail="start_time must be before end_time")
 
-        provider_handler = self.runtime.provider_manager.get_provider(query.provider)
+        provider_handler = self.runtime.provider_manager.get_provider(query.provider.lower())
+
+        if provider_handler is None:
+            raise ValueError(f"Unknow provider {query.provider}. Choose one of {self.runtime.provider_manager.list_providers()}")
+
         df, pending = await self.runtime.query_manager.get_data(
             db=self.runtime.db,
             provider_handler=provider_handler,
