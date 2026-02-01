@@ -12,172 +12,63 @@ gaps/placeholder rows behave as expected before deploying to production.
 import logging
 import logging.config
 from datetime import datetime
-from typing import Iterable, Tuple
+import asyncio
 
 import pytz
 
-from src.query_manager import QueryManager
-from src.config import load_config
-from src.database.db import MeteoDB
-from src.provider_manager import ProviderManager
-
+from src.runtime import RuntimeContext
+from src.workflow import QueryWorkflow
+from src.validation import TimeseriesQuery
 
 tz = pytz.timezone("utc")
 logger = logging.getLogger(__name__)
-
 
 def dt(year: int, month: int, day: int, hour: int = 0, minute: int = 0, second: int = 0):
     """Shortcut for building UTC-aware datetimes."""
     return datetime(year, month, day, hour, minute, second, tzinfo=tz)
 
-
-def summarize_result(df, start, end, station, scenario_name):
-    """Log useful diagnostics for each query result."""
-    if df.empty:
-        logger.warning(f"[{scenario_name}] Station {station}: no rows returned for {start}–{end}")
-        return
-
-    duplicates = int(df.index.duplicated().sum())
-    value_df = df.drop(columns=['station_id']) if 'station_id' in df.columns else df
-    null_rows = int(value_df.isna().all(axis=1).sum())
-    coverage = (df.index.max() - df.index.min()) if len(df.index) > 1 else 0
-    logger.info(
-        "[%s] Station %s: %s rows, %s unique timestamps, duplicates=%s, placeholder_rows=%s, coverage=%s",
-        scenario_name,
-        station,
-        len(df),
-        df.index.nunique(),
-        duplicates,
-        null_rows,
-        coverage,
-    )
-
-    if duplicates:
-        logger.error("Duplicated timestamps detected for station %s; inspect DB for uniqueness issues.", station)
-
-
-def run_scenario(
-    scenario_name: str,
-    stations: Iterable[str],
-    ranges: Iterable[Tuple[datetime, datetime]],
-    repetitions: int,
-    manager: QueryManager,
-    db: MeteoDB,
-    provider: str,
-    variables=None,
-):
-    logger.info("=== Scenario: %s ===", scenario_name)
-    for repetition in range(repetitions):
-        logger.info("Repetition %s/%s", repetition + 1, repetitions)
-        for station in stations:
-            for start_time, end_time in ranges:
-                logger.debug(
-                    "[%s] Querying station=%s range=%s – %s", scenario_name, station, start_time, end_time
-                )
-                data = manager.get_data(
-                    db=db,
-                    provider=provider,
-                    station_id=station,
-                    start_time=start_time,
-                    end_time=end_time,
-                    variables=variables,
-                )
-                summarize_result(data, start_time, end_time, station, scenario_name)
-
-
-def main():
-    config = load_config("config/config.yaml")
-    logging.config.dictConfig(config["logging"])
-    global logger
-    logger = logging.getLogger(__name__)
-
-    provider_stations_dict = {
-        'province': ["09700MS"],
-        'SBR': [103, 113]
+_PROVINCE_TEST_STATIONS = ["01110MS", "23200MS", "89190MS", "65350MS", "41000MS", "31410MS"]
+_SBR_TEST_STATIONS = [103, 113, 96, 137, 140, 12]
+_QUERY_COMBINATIONS = {
+    "province": {
+        "q1": {"start_time": dt(2025, 1, 1), "end_time": dt(2026, 1, 1), "station_ids": _PROVINCE_TEST_STATIONS},
+        "q2": {"start_time": dt(2025, 2, 1), "end_time": dt(2025, 2, 10), "station_ids": _PROVINCE_TEST_STATIONS},
+        "q3": {"start_time": dt(2025, 10, 1), "end_time": dt(2025, 10, 10), "station_ids": _PROVINCE_TEST_STATIONS},
+        "q4": {"start_time": dt(2025, 12, 1), "end_time": dt(2026, 2, 1), "station_ids": _PROVINCE_TEST_STATIONS}
+    },
+    "sbr": {
+        "q1": {"start_time": dt(2026, 1, 1), "end_time": dt(2026, 1, 10), "station_ids": _SBR_TEST_STATIONS},
+        "q2": {"start_time": dt(2025, 12, 25), "end_time": dt(2026, 1, 2), "station_ids": _SBR_TEST_STATIONS},
+        "q3": {"start_time": dt(2026, 1, 7), "end_time": dt(2026, 1, 14), "station_ids": _SBR_TEST_STATIONS}
     }
+}
 
-    long_ranges = [
-        (dt(2025, 10, 1, 0, 0), dt(2025, 12, 31, 23, 55)), #daylight saving time changes
-        (dt(2024, 12, 30, 0, 0), dt(2025, 1, 2, 0, 0))   #cross year boundary
-    ]
+async def main():
+    logging.basicConfig(
+        level = logging.DEBUG,
+        format = '[%(asctime)s] %(levelname)s - %(message)s'
+        )
 
-    overlapping_ranges = [
-        (dt(2025, 11, 24, 15, 0), dt(2025, 11, 25, 9, 0)),
-        (dt(2025, 11, 25, 4, 0), dt(2025, 11, 25, 9, 0)),
-        (dt(2025, 11, 25, 8, 30), dt(2025, 11, 25, 10, 0)),
-    ]
+    runtime = RuntimeContext.from_config_file('config/config.yaml')
+    workflow = QueryWorkflow(runtime)
 
-    short_handoff_ranges = [
-        (dt(2025, 8, 26, 22, 0), dt(2025, 8, 26, 23, 0)),
-        (dt(2025, 8, 26, 23, 0), dt(2025, 8, 27, 0, 30)),
-        (dt(2025, 8, 27, 0, 30), dt(2025, 8, 27, 2, 0)),
-    ]
+    for provider_name, query_dict in _QUERY_COMBINATIONS.items():
+        for query_id, params_l1 in query_dict.items():
+            test_ids = params_l1['station_ids']
+            if isinstance(test_ids, str):
+                test_ids = [test_ids]
+            for station_id in test_ids:
+                query = TimeseriesQuery(
+                    provider = provider_name,
+                    start_time = params_l1['start_time'],
+                    end_time = params_l1['end_time'],
+                    station_id = station_id,
+                )
 
-    mixed_day_ranges = [
-        (dt(2025, 8, 28, 6, 0), dt(2025, 8, 28, 7, 0)),
-        (dt(2025, 8, 28, 12, 0), dt(2025, 8, 28, 13, 0)),
-        (dt(2025, 8, 28, 18, 0), dt(2025, 8, 28, 19, 0)),
-    ]
-
-    provider_manager = ProviderManager(provider_config=config["providers"])
-    meteo_db = MeteoDB(provider_manager=provider_manager)
-    query_manager = QueryManager(config, provider_manager=provider_manager)
-
-    for provider_query, stations_to_test in provider_stations_dict.items():
-        try:
-            run_scenario(
-                scenario_name="multi_month_ranges",
-                stations=stations_to_test,
-                ranges=long_ranges,
-                repetitions=1,
-                manager=query_manager,
-                db=meteo_db,
-                provider=provider_query,
-            )
-
-            run_scenario(
-                scenario_name="overlapping_windows_single_station",
-                stations=stations_to_test,
-                ranges=overlapping_ranges,
-                repetitions=1,
-                manager=query_manager,
-                db=meteo_db,
-                provider=provider_query,
-            )
-
-            run_scenario(
-                scenario_name="idempotent_re_query",
-                stations=stations_to_test,
-                ranges=short_handoff_ranges[:1],
-                repetitions=1,
-                manager=query_manager,
-                db=meteo_db,
-                provider=provider_query,
-            )
-
-            run_scenario(
-                scenario_name="adjacent_windows_multiple_stations",
-                stations=stations_to_test,
-                ranges=short_handoff_ranges,
-                repetitions=1,
-                manager=query_manager,
-                db=meteo_db,
-                provider=provider_query,
-            )
-
-            run_scenario(
-                scenario_name="scattered_daytime_checks",
-                stations=stations_to_test,
-                ranges=mixed_day_ranges,
-                repetitions=1,
-                manager=query_manager,
-                db=meteo_db,
-                provider=provider_query,
-            )
-
-        finally:
-            meteo_db.close()
-
+                try:
+                    await workflow.run_timeseries_query(query)
+                except Exception as e:
+                    logger.exception(f"Failed to test query {query_id} for station {station_id}: {e}")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
