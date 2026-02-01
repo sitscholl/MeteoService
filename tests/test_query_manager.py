@@ -67,15 +67,15 @@ async def _run_query(workflow, provider_handler, station_id, start_time, end_tim
 _PROVINCE_TEST_STATIONS = ["01110MS", "23200MS", "89190MS", "65350MS", "41000MS", "31410MS"]
 _SBR_TEST_STATIONS = ["103", "113", "96", "137", "140", "12"]
 _QUERY_COMBINATIONS = {
-    # "province": {
-    #     "q1": {"start_time": dt(2025, 1, 1), "end_time": dt(2026, 1, 1), "station_ids": _PROVINCE_TEST_STATIONS},
-    #     "q2": {"start_time": dt(2025, 2, 1), "end_time": dt(2025, 2, 10), "station_ids": _PROVINCE_TEST_STATIONS},
-    #     "q3": {"start_time": dt(2025, 10, 1), "end_time": dt(2025, 10, 10), "station_ids": _PROVINCE_TEST_STATIONS},
-    #     "q4": {"start_time": dt(2025, 12, 1), "end_time": dt(2026, 2, 1), "station_ids": _PROVINCE_TEST_STATIONS}
-    # },
+    "province": {
+        "q1": {"start_time": dt(2025, 1, 1), "end_time": dt(2026, 1, 1), "station_ids": _PROVINCE_TEST_STATIONS},
+        "q2": {"start_time": dt(2025, 2, 1), "end_time": dt(2025, 2, 10), "station_ids": _PROVINCE_TEST_STATIONS},
+        "q3": {"start_time": dt(2025, 10, 1), "end_time": dt(2025, 10, 10), "station_ids": _PROVINCE_TEST_STATIONS},
+        "q4": {"start_time": dt(2025, 12, 1), "end_time": dt(2026, 2, 1), "station_ids": _PROVINCE_TEST_STATIONS}
+    },
     "sbr": {
-        #"q1": {"start_time": dt(2026, 1, 1), "end_time": dt(2026, 1, 10), "station_ids": _SBR_TEST_STATIONS},
-        #"q2": {"start_time": dt(2025, 12, 25), "end_time": dt(2026, 1, 2), "station_ids": _SBR_TEST_STATIONS},
+        "q1": {"start_time": dt(2026, 1, 1), "end_time": dt(2026, 1, 10), "station_ids": _SBR_TEST_STATIONS},
+        "q2": {"start_time": dt(2025, 12, 25), "end_time": dt(2026, 1, 2), "station_ids": _SBR_TEST_STATIONS},
         "q3": {"start_time": dt(2026, 1, 7), "end_time": dt(2026, 1, 14), "station_ids": _SBR_TEST_STATIONS}
     }
 }
