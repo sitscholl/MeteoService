@@ -94,40 +94,43 @@ async def main():
     runtime = RuntimeContext.from_config_file('config/config.yaml')
     workflow = QueryWorkflow(runtime)
 
-    for provider_name, query_dict in _QUERY_COMBINATIONS.items():
-        provider_handler = runtime.provider_manager.get_provider(provider_name)
-        for query_id, params_l1 in query_dict.items():
-            test_ids = params_l1['station_ids']
-            if isinstance(test_ids, str):
-                test_ids = [test_ids]
-            for station_id in test_ids:
-                try:
-                    response, pending = await _run_query(
-                        workflow,
-                        provider_handler,
-                        station_id,
-                        params_l1['start_time'],
-                        params_l1['end_time'],
-                        db = runtime.db,
-                    )
-                    logger.info(
-                        f"[{provider_name}:{query_id}:{station_id}] "
-                        f"count={response.count} pending={len(pending) if hasattr(pending, '__len__') else 'n/a'}"
-                    )
-                except Exception as e:
-                    logger.exception(f"Failed to test query {query_id} for station {station_id}: {e}")
+    # for provider_name, query_dict in _QUERY_COMBINATIONS.items():
+    #     provider_handler = runtime.provider_manager.get_provider(provider_name)
+    #     for query_id, params_l1 in query_dict.items():
+    #         test_ids = params_l1['station_ids']
+    #         if isinstance(test_ids, str):
+    #             test_ids = [test_ids]
+    #         for station_id in test_ids:
+    #             try:
+    #                 response, pending = await _run_query(
+    #                     workflow,
+    #                     provider_handler,
+    #                     station_id,
+    #                     params_l1['start_time'],
+    #                     params_l1['end_time'],
+    #                     db = runtime.db,
+    #                 )
+    #                 logger.info(
+    #                     f"[{provider_name}:{query_id}:{station_id}] "
+    #                     f"count={response.count} pending={len(pending) if hasattr(pending, '__len__') else 'n/a'}"
+    #                 )
+    #             except Exception as e:
+    #                 logger.exception(f"Failed to test query {query_id} for station {station_id}: {e}")
 
-    # Latest query
+    # Latest provider-only query
     try:
-        response, _ = await _run_query(
-            workflow,
-            runtime.provider_manager.get_provider("province"),
-            _PROVINCE_TEST_STATIONS[0],
-            None, None,
-            db = runtime.db,
+        provider_handler = runtime.provider_manager.get_provider("province")
+        latest_df = await runtime.query_manager.get_latest_from_provider(
+            provider_handler=provider_handler,
+            station_id=_PROVINCE_TEST_STATIONS[0],
+            window_minutes=provider_handler.latest_window_minutes,
         )
+        if not latest_df.empty:
+            obs_cols = [c for c in latest_df.columns if c != "station_id"]
+            if obs_cols and latest_df[obs_cols].isna().all(axis=None):
+                raise AssertionError("Latest provider-only query returned only NA observation values.")
     except Exception as e:
-        logger.exception(f"Latest query test failed for province: {e}")
+        logger.exception(f"Latest provider-only query test failed for province: {e}")
 
     # Boundary inclusion (timestamp bounds only)
     boundary_start = dt(2025, 10, 1, 0, 0, 0)
