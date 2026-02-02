@@ -117,6 +117,18 @@ async def main():
                 except Exception as e:
                     logger.exception(f"Failed to test query {query_id} for station {station_id}: {e}")
 
+    # Latest query
+    try:
+        response, _ = await _run_query(
+            workflow,
+            runtime.provider_manager.get_provider("province"),
+            _PROVINCE_TEST_STATIONS[0],
+            None, None,
+            db = runtime.db,
+        )
+    except Exception as e:
+        logger.exception(f"Latest query test failed for province: {e}")
+
     # Boundary inclusion (timestamp bounds only)
     boundary_start = dt(2025, 10, 1, 0, 0, 0)
     boundary_end = dt(2025, 10, 1, 1, 0, 0)
