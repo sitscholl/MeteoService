@@ -75,15 +75,20 @@ class TimeseriesResponse(BaseModel):
         if latest:
             df = df.sort_index().iloc[[-1]]
 
-        data = []
-        for timestamp, row in df.iterrows():
-            try:
-                ts_val = timestamp.isoformat()
-            except Exception:
-                ts_val = str(timestamp)
-            row_clean = row.where(pd.notna(row), None).to_dict()
-            record = {"datetime": ts_val, **row_clean}
-            data.append(record)
+        df_out = df.copy()
+        df_out = df_out.reset_index()
+        if "datetime" not in df_out.columns:
+            df_out = df_out.rename(columns={"index": "datetime"})
+
+        df_out["datetime"] = pd.to_datetime(df_out["datetime"], errors="coerce")
+        if getattr(df_out["datetime"].dt, "tz", None) is not None:
+            ts = df_out["datetime"].dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+            df_out["datetime"] = ts.str.replace(r"([+-]\d{2})(\d{2})$", r"\1:\2", regex=True)
+        else:
+            df_out["datetime"] = df_out["datetime"].dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+        df_out = df_out.where(pd.notna(df_out), None)
+        data = df_out.to_dict(orient="records")
 
         return cls(
             data=data,
