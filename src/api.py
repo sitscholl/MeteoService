@@ -94,23 +94,6 @@ async def get_stations(provider: str):
         logger.error(f"Failed to get stations for provider {provider}: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve stations")
 
-@app.post("/api/timeseries", response_model=TimeseriesResponse)
-async def query_timeseries(
-    query: TimeseriesQuery,
-    background_tasks: BackgroundTasks,
-    workflow: QueryWorkflow = Depends(get_workflow),
-):
-    try:
-        response, pending = await workflow.run_timeseries_query(query)
-        if pending is not None and not pending.empty:
-            background_tasks.add_task(runtime.db.insert_data, pending, query.provider)
-        return response
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Query failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
-
 @app.get("/api/timeseries", response_model=TimeseriesResponse)
 async def query_timeseries_get(
         background_tasks: BackgroundTasks,
