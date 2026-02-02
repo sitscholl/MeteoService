@@ -12,7 +12,7 @@ import pytz
 import logging
 
 from . import validation as validation_module
-from .validation import TimeseriesResponse, TimeseriesQuery
+from .validation import TimeseriesResponse, TimeseriesQuery, LatestValuesEntry
 from .runtime import RuntimeContext
 from .workflow import QueryWorkflow
 
@@ -93,6 +93,37 @@ async def get_stations(provider: str):
     except Exception as e:
         logger.error(f"Failed to get stations for provider {provider}: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve stations")
+
+@app.get("/{provider}/timeseries/latest", response_model=List[LatestValuesEntry])
+async def get_latest_station_values(
+    provider: str,
+    station_id: Optional[List[str]] = Query(
+        description="Repeat param for multiple, e.g. ?station_id=1&station_id=2. Also accepts comma-separated.",
+    ),
+    variables: Optional[List[str]] = Query(
+        None,
+        description="Repeat param for multiple, e.g. ?variables=tmp&variables=hum. Also accepts comma-separated.",
+    ),
+    workflow: QueryWorkflow = Depends(get_workflow),
+):
+
+    if len(station_id) == 1 and "," in station_id[0]:
+        station_id = [st.strip() for st in station_id[0].split(",") if st.strip()]
+
+    if variables and len(variables) == 1 and "," in variables[0]:
+        variables = [v.strip() for v in variables[0].split(",") if v.strip()]
+
+    try:
+        return await workflow.run_latest_query(
+            provider=provider,
+            station_ids=station_id,
+            variables=variables,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"GET /{provider}/timeseries/latest failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve latest values")
 
 @app.post("/query", response_model=TimeseriesResponse)
 async def query_timeseries(
