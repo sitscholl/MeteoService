@@ -1,4 +1,6 @@
 import pandas as pd
+import pytz
+from datetime import datetime, timedelta
 from fastapi import HTTPException
 
 from .runtime import RuntimeContext
@@ -6,13 +8,36 @@ from .validation import TimeseriesQuery, TimeseriesResponse
 
 class QueryWorkflow:
 
-    def __init__(self, runtime: RuntimeContext):
+    def __init__(self, runtime: RuntimeContext, latest_window_minutes: int = 60):
         self.runtime = runtime
+        self.latest_window_minutes = latest_window_minutes
 
     async def run_timeseries_query(
         self,
         query: TimeseriesQuery,
     ):
+        tz_name = query.timezone or self.runtime.default_timezone
+        tz = pytz.timezone(tz_name)
+
+        start_time = query.start_time
+        end_time = query.end_time
+        if start_time is None and end_time is None:
+            latest = True
+        else:
+            latest = False
+
+        if end_time is None:
+            end_time = datetime.now(tz)
+        elif end_time.tzinfo is None:
+            end_time = tz.localize(end_time)
+
+        if start_time is None:
+            start_time = end_time - timedelta(minutes=self.latest_window_minutes)
+        elif start_time.tzinfo is None:
+            start_time = tz.localize(start_time)
+
+        query.start_time = start_time
+        query.end_time = end_time
 
         if query.start_time >= query.end_time:
             raise HTTPException(status_code=400, detail="start_time must be before end_time")
@@ -22,6 +47,7 @@ class QueryWorkflow:
         if provider_handler is None:
             raise ValueError(f"Unknow provider {query.provider}. Choose one of {self.runtime.provider_manager.list_providers()}")
 
+        ## TODO: fix bug when query goes until now(), latest timestamps which are not included yet are filled with NAN and persisted in the DB
         df, pending = await self.runtime.query_manager.get_data(
             db=self.runtime.db,
             provider_handler=provider_handler,
@@ -48,32 +74,10 @@ class QueryWorkflow:
             "timezone_used": str(query.start_time.tzinfo),
             }
 
-        if df.empty:
-            response = TimeseriesResponse(
-                data=[],
-                count=0,
-                time_range={"start": query.start_time, "end": query.end_time},
-                metadata=query_metadata,
-            )
-            return (response, pending)
+        if not df.empty:
+            query_metadata['result_timezone'] = str(getattr(df.index, "tz", None))
 
-        data = []
-        for timestamp, row in df.iterrows():
-            try:
-                ts_val = timestamp.isoformat()
-            except Exception:
-                ts_val = str(timestamp)
-            row_clean = row.where(pd.notna(row), None).to_dict()
-            record = {"datetime": ts_val, **row_clean}
-            data.append(record)
+        response = TimeseriesResponse.from_dataframe(df, latest = latest)
+        response.metadata = query_metadata
 
-        query_metadata['result_timezone'] = str(getattr(df.index, "tz", None))
-
-        response = TimeseriesResponse(
-            data=data,
-            count=len(data),
-            time_range={"start": df.index.min(), "end": df.index.max()},
-            metadata=query_metadata,
-        )
         return (response, pending)
-

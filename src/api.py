@@ -59,7 +59,7 @@ async def root():
         """
     }
 
-@app.get("/health")
+@app.get("/api/health")
 async def health_check():
     """Health check endpoint."""
     try:
@@ -73,7 +73,7 @@ async def health_check():
         logger.error(f"Health check failed: {e}")
         raise HTTPException(status_code=503, detail="Database unavailable")
 
-@app.get("/providers", response_model=List[str])
+@app.get("/api/providers", response_model=List[str])
 async def get_providers():
     """Get list of available providers."""
     try:
@@ -82,7 +82,7 @@ async def get_providers():
         logger.error(f"Failed to get providers: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve providers")
 
-@app.get("/{provider}/stations", response_model=List[str])
+@app.get("/api/{provider}/stations", response_model=List[str])
 async def get_stations(provider: str):
     """Get list of available stations for a given provider."""
     try:
@@ -94,38 +94,7 @@ async def get_stations(provider: str):
         logger.error(f"Failed to get stations for provider {provider}: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve stations")
 
-@app.get("/{provider}/timeseries/latest", response_model=List[LatestValuesEntry])
-async def get_latest_station_values(
-    provider: str,
-    station_id: Optional[List[str]] = Query(
-        description="Repeat param for multiple, e.g. ?station_id=1&station_id=2. Also accepts comma-separated.",
-    ),
-    variables: Optional[List[str]] = Query(
-        None,
-        description="Repeat param for multiple, e.g. ?variables=tmp&variables=hum. Also accepts comma-separated.",
-    ),
-    workflow: QueryWorkflow = Depends(get_workflow),
-):
-
-    if len(station_id) == 1 and "," in station_id[0]:
-        station_id = [st.strip() for st in station_id[0].split(",") if st.strip()]
-
-    if variables and len(variables) == 1 and "," in variables[0]:
-        variables = [v.strip() for v in variables[0].split(",") if v.strip()]
-
-    try:
-        return await workflow.run_latest_query(
-            provider=provider,
-            station_ids=station_id,
-            variables=variables,
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"GET /{provider}/timeseries/latest failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve latest values")
-
-@app.post("/query", response_model=TimeseriesResponse)
+@app.post("/api/timeseries", response_model=TimeseriesResponse)
 async def query_timeseries(
     query: TimeseriesQuery,
     background_tasks: BackgroundTasks,
@@ -142,13 +111,13 @@ async def query_timeseries(
         logger.error(f"Query failed: {e}")
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
-@app.get("/query", response_model=TimeseriesResponse)
+@app.get("/api/timeseries", response_model=TimeseriesResponse)
 async def query_timeseries_get(
         background_tasks: BackgroundTasks,
         provider: str = Query(..., description="Provider name, e.g., 'SBR'"),
         station_id: str = Query(..., description="External station id"),
-        start_date: datetime = Query(..., description="ISO datetime; e.g. 2025-01-15T10:30:00Z"),
-        end_date: datetime = Query(..., description="ISO datetime; e.g. 2025-01-15T12:30:00+01:00"),
+        start_date: Optional[datetime] = Query(None, description="ISO datetime; e.g. 2025-01-15T10:30:00Z"),
+        end_date: Optional[datetime] = Query(None, description="ISO datetime; e.g. 2025-01-15T12:30:00+01:00"),
         variables: Optional[List[str]] = Query(
             None,
             description="Repeat param for multiple, e.g. ?variables=tmp&variables=hum. Also accepts comma-separated.",
