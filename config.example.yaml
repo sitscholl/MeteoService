@@ -20,34 +20,3 @@ database:
 # API configuration
 api:
   default_timezone: 'Europe/Rome'  # Default timezone for naive datetimes in API requests
-
-logging:
-    version: 1
-    disable_existing_loggers: false
-    formatters: 
-        standard:
-            format: "%(asctime)s - %(levelname)s - %(filename)s (%(process)d): %(message)s"
-            datefmt: "%Y-%m-%d %H:%M:%S"
-        email:
-            format: "%(message)s"
-            datefmt: "%Y-%m-%d %H:%M:%S"
-    handlers:
-        console:
-          class: logging.StreamHandler
-          formatter: standard
-          level: DEBUG
-          stream: ext://sys.stdout
-        file:
-          class: logging.handlers.TimedRotatingFileHandler
-          level: INFO
-          formatter: standard
-          filename: config/logs/meteoservice.log
-          when: midnight
-          interval: 1
-          backupCount: 30  # Keep 30 days of logs
-          utc: false
-          encoding: utf8
-    loggers:
-        root:
-            handlers: [console, file]
-            level: DEBUG
