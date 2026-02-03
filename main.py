@@ -1,15 +1,10 @@
 import uvicorn
 
-import logging
-import logging.config
-
-from src.config import load_config
+from src.log_handler import LogHandler
 from src.api import app
 
-# Load config file
-config = load_config("config/config.yaml")
-
 # Configure logging
-logging.config.dictConfig(config['logging'])
+log_handler = LogHandler.from_file("config.logging.yaml")
+log_handler.start_logger()
 
-uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+uvicorn.run(app, host="0.0.0.0", port=8000, log_level=None)

@@ -254,6 +254,10 @@ class QueryManager:
         if start_time_round >= end_time_round:
             return pd.DataFrame()
 
+        logger.info(
+            f"Querying latest data for station {station_id} (provider={provider_handler.provider_name}) from {start_time_round:%Y-%m-%d %H:%M:%S} (UTC) to {end_time_round:%Y-%m-%d %H:%M:%S} (UTC) with frequency {provider_handler.freq}"
+            )
+
         async with provider_handler as prv:
             provider_data = await prv.run(
                 start=start_time_round,
