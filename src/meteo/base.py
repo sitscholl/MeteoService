@@ -97,7 +97,7 @@ class BaseMeteoHandler(ABC):
         pass
 
     @abstractmethod
-    async def get_station_info(self, station_id: str | None) -> Dict[str, Any] | None:
+    async def get_station_info(self, station_id: str | None) -> Dict[str, Any]:
         """
         Query information for a given station from the source, 
         such as elevation, latitude or longitude. Query for all stations if no station is given.
