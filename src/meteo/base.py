@@ -19,7 +19,7 @@ class BaseMeteoHandler(ABC):
 
     def __init__(
         self, 
-        timezone, 
+        timezone: str, 
         chunk_size_days: int = 365, 
         timeout: int = 20, 
         max_concurrent_requests: int = 5,
