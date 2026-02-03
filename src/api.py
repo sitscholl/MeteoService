@@ -12,7 +12,7 @@ import pytz
 import logging
 
 from . import validation as validation_module
-from .validation import TimeseriesResponse, TimeseriesQuery, LatestValuesEntry
+from .validation import TimeseriesResponse, TimeseriesQuery
 from .runtime import RuntimeContext
 from .workflow import QueryWorkflow
 
@@ -86,10 +86,12 @@ async def get_providers():
 async def get_stations(provider: str):
     """Get list of available stations for a given provider."""
     try:
-        provider_handler = runtime.provider_manager.get_provider(provider.lower)
+        provider_handler = runtime.provider_manager.get_provider(provider.lower())
         if provider_handler is None:
             raise ValueError(f"Unknown provider {provider.lower()}. Check /providers endpoint for available providers.")
-        return await provider_handler.get_stations()
+        async with provider_handler as prv:
+            station_list = await provider_handler.get_stations()
+        return station_list
     except Exception as e:
         logger.error(f"Failed to get stations for provider {provider}: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve stations")
@@ -130,7 +132,8 @@ async def query_timeseries_get(
     try:
         response, pending = await workflow.run_timeseries_query(q)
         if pending is not None and not pending.empty:
-            background_tasks.add_task(runtime.db.insert_data, pending, provider)
+            provider_handler = runtime.provider_manager.get_provider(provider.lower())
+            background_tasks.add_task(runtime.db.insert_data, pending, provider_handler)
         return response
     except HTTPException:
         raise
