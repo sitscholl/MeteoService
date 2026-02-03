@@ -3,6 +3,7 @@ import asyncio
 
 import logging
 from typing import Tuple, Dict, Any
+import datetime
 
 from .base import BaseMeteoHandler
 
@@ -40,7 +41,7 @@ class OpenMeteo(BaseMeteoHandler):
 
     @property
     def freq(self):
-        return "H"
+        return "h"
 
     @property
     def inclusive(self):
@@ -65,7 +66,7 @@ class OpenMeteo(BaseMeteoHandler):
         return info['lat'], info['lon']
 
     async def _create_request_task(
-        self, station_id: str, sensors: list[str]
+        self, station_id: str, sensors: list[str], start=None, end=None
         ):
 
         if self._client is None:
@@ -73,12 +74,16 @@ class OpenMeteo(BaseMeteoHandler):
         
         try:
             lat, lon = await self.get_station_coords(station_id)
-            data_params = {
+            data_params: Dict[str, Any] = {
                 "latitude": lat,
                 "longitude": lon,
                 "hourly": sensors,
                 "timezone": self.timezone
             }
+            if start is not None:
+                data_params["start_date"] = pd.Timestamp(start).strftime("%Y-%m-%d")
+            if end is not None:
+                data_params["end_date"] = pd.Timestamp(end).strftime("%Y-%m-%d")
             async with self._semaphore:
                 response = await self._client.get(
                         self.timeseries_url, params = data_params,
@@ -103,6 +108,8 @@ class OpenMeteo(BaseMeteoHandler):
     async def get_raw_data(            
             self,            
             station_id: str,
+            start: datetime.datetime | None = None,
+            end: datetime.datetime | None = None,
             sensor_codes: list[str] | None = None,
             **kwargs
         ) -> Tuple[pd.DataFrame | None, Dict]:
@@ -111,7 +118,7 @@ class OpenMeteo(BaseMeteoHandler):
         if station_id not in possible_stations:
             raise ValueError(f"Invalid station_id {station_id}. Choose one from {possible_stations}")
         
-        all_sensors = await self.get_sensors()
+        all_sensors = await self.get_sensors(station_id)
         if sensor_codes is None:
             sensor_codes = all_sensors
         else:
@@ -121,8 +128,13 @@ class OpenMeteo(BaseMeteoHandler):
                 if sensor not in all_sensors:
                     raise ValueError(f"Invalid sensor {sensor}. Choose from: {all_sensors}")
 
+        if start is not None and end is not None and start > end:
+            raise ValueError(f"start must be before end. Got {start} - {end}")
+
         # Create tasks
-        raw_response = await self._create_request_task(station_id, sensor_codes)        
+        raw_response = await self._create_request_task(
+            station_id, sensor_codes, start=start, end=end
+        )
         st_metadata = await self.get_station_info(station_id)
         if raw_response is None:
             logger.warning(f"No data could be fetched for station {station_id}")
