@@ -4,7 +4,6 @@ import asyncio
 import logging
 from typing import Tuple, Dict, Any
 import datetime
-import re
 
 from .base import BaseMeteoHandler
 
@@ -198,8 +197,10 @@ class OpenMeteo(BaseMeteoHandler):
         if new_columns:
             df_prepared.rename(columns=new_columns, inplace=True)
 
-        for col in ['wind_direction', "relative_humidity"]:
-            if col in df_prepared.columns:
+        for col in df_prepared.columns:
+            if col in {"datetime", "station_id"}:
+                continue
+            if pd.api.types.is_integer_dtype(df_prepared[col]):
                 df_prepared[col] = df_prepared[col].astype(float)
 
         try:
