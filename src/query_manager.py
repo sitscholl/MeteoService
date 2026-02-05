@@ -232,62 +232,6 @@ class QueryManager:
 
         combined = self._combine_existing_and_new(existing_data, new_data, orig_timezone)
         return combined, new_data
-
-    async def get_latest_from_provider(
-            self,
-            provider_handler: BaseMeteoHandler,
-            station_id: str,
-            window_minutes: int = 180,
-            variables: Optional[List[str]] = None
-        ) -> pd.DataFrame:
-        """Fetch latest available data directly from provider within a window."""
-        if not isinstance(station_id, str):
-            station_id = str(station_id)
-
-        end_time = datetime.now(timezone.utc)
-        start_time = end_time - timedelta(minutes=window_minutes)
-        start_time_round, end_time_round = self._round_range_to_freq(
-            start_time,
-            end_time,
-            freq=provider_handler.freq
-        )
-        if start_time_round >= end_time_round:
-            return pd.DataFrame()
-
-        logger.info(
-            f"Querying latest data for station {station_id} (provider={provider_handler.provider_name}) from {start_time_round:%Y-%m-%d %H:%M:%S} (UTC) to {end_time_round:%Y-%m-%d %H:%M:%S} (UTC) with frequency {provider_handler.freq}"
-            )
-
-        async with provider_handler as prv:
-            provider_data = await prv.run(
-                start=start_time_round,
-                end=end_time_round,
-                data_type='meteo',
-                station_id=station_id
-            )
-
-        if provider_data is None or provider_data.empty:
-            return pd.DataFrame()
-
-        if 'datetime' in provider_data.columns:
-            provider_data = provider_data.set_index('datetime')
-        provider_data = provider_data[~provider_data.index.duplicated(keep='last')].sort_index()
-
-        if variables is not None:
-            for column in variables:
-                if column not in provider_data.columns:
-                    provider_data[column] = pd.NA
-            keep_cols = [c for c in ['station_id', *variables] if c in provider_data.columns]
-            provider_data = provider_data[keep_cols]
-
-        obs_cols = [c for c in provider_data.columns if c != 'station_id']
-        if obs_cols:
-            provider_data = provider_data.dropna(subset=obs_cols, how='all')
-
-        if provider_data.empty:
-            return pd.DataFrame()
-
-        return provider_data.iloc[[-1]]
        
     @staticmethod
     def _validate_query_times(start_time, end_time):

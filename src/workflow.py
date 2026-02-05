@@ -16,6 +16,7 @@ class QueryWorkflow:
     async def run_timeseries_query(
         self,
         query: TimeseriesQuery,
+        latest: bool = False
     ):
         tz_name = query.timezone or self.runtime.default_timezone
         tz = pytz.timezone(tz_name)
@@ -27,51 +28,31 @@ class QueryWorkflow:
 
         start_time = query.start_time
         end_time = query.end_time
-        latest = start_time is None and end_time is None
 
-        if latest:
-            window_minutes = provider_handler.latest_window_minutes
+        if end_time is None:
             end_time = datetime.now(tz)
-            start_time = end_time - timedelta(minutes=window_minutes)
-            query.start_time = start_time
-            query.end_time = end_time
+        elif end_time.tzinfo is None:
+            end_time = tz.localize(end_time)
 
-            df = await self.runtime.query_manager.get_latest_from_provider(
-                provider_handler=provider_handler,
-                station_id=query.station_id,
-                window_minutes=window_minutes,
-                variables=query.variables,
-            )
-            pending = None
-            if not df.empty:
-                pending = df.reset_index()
-                if "datetime" not in pending.columns:
-                    pending = pending.rename(columns={"index": "datetime"})
-        else:
-            if end_time is None:
-                end_time = datetime.now(tz)
-            elif end_time.tzinfo is None:
-                end_time = tz.localize(end_time)
+        if start_time is None:
+            start_time = end_time - timedelta(minutes=provider_handler.latest_window_minutes)
+        elif start_time.tzinfo is None:
+            start_time = tz.localize(start_time)
 
-            if start_time is None:
-                start_time = end_time - timedelta(minutes=provider_handler.latest_window_minutes)
-            elif start_time.tzinfo is None:
-                start_time = tz.localize(start_time)
+        query.start_time = start_time
+        query.end_time = end_time
 
-            query.start_time = start_time
-            query.end_time = end_time
+        if query.start_time >= query.end_time:
+            raise HTTPException(status_code=400, detail="start_time must be before end_time")
 
-            if query.start_time >= query.end_time:
-                raise HTTPException(status_code=400, detail="start_time must be before end_time")
-
-            df, pending = await self.runtime.query_manager.get_data(
-                db=self.runtime.db,
-                provider_handler=provider_handler,
-                station_id=query.station_id,
-                start_time=query.start_time,
-                end_time=query.end_time,
-                variables=query.variables,
-            )
+        df, pending = await self.runtime.query_manager.get_data(
+            db=self.runtime.db,
+            provider_handler=provider_handler,
+            station_id=query.station_id,
+            start_time=query.start_time,
+            end_time=query.end_time,
+            variables=query.variables,
+        )
 
         station = self.runtime.db.query_station(provider=provider_handler.provider_name, external_id=query.station_id)
         if not station:

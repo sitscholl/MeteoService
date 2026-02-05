@@ -117,20 +117,23 @@ async def main():
     #             except Exception as e:
     #                 logger.exception(f"Failed to test query {query_id} for station {station_id}: {e}")
 
-    # Latest provider-only query
+    # Latest query (may return cached data)
     try:
         provider_handler = runtime.provider_manager.get_provider("province")
-        latest_df = await runtime.query_manager.get_latest_from_provider(
-            provider_handler=provider_handler,
+        latest_query = TimeseriesQuery(
+            provider=provider_handler.provider_name,
+            start_time=None,
+            end_time=None,
             station_id=_PROVINCE_TEST_STATIONS[0],
-            window_minutes=provider_handler.latest_window_minutes,
         )
-        if not latest_df.empty:
-            obs_cols = [c for c in latest_df.columns if c != "station_id"]
+        latest_response, _ = await workflow.run_timeseries_query(latest_query, latest=True)
+        if latest_response.count > 0:
+            latest_df = _normalize_response(latest_response)
+            obs_cols = [c for c in latest_df.columns if c not in {"station_id", "datetime"}]
             if obs_cols and latest_df[obs_cols].isna().all(axis=None):
-                raise AssertionError("Latest provider-only query returned only NA observation values.")
+                raise AssertionError("Latest query returned only NA observation values.")
     except Exception as e:
-        logger.exception(f"Latest provider-only query test failed for province: {e}")
+        logger.exception(f"Latest query test failed for province: {e}")
 
     # Boundary inclusion (timestamp bounds only)
     boundary_start = dt(2025, 10, 1, 0, 0, 0)

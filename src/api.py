@@ -96,10 +96,11 @@ async def get_stations(provider: str):
         logger.error(f"Failed to get stations for provider {provider}: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve stations")
 
-@app.get("/api/{provider}/timeseries", response_model=TimeseriesResponse)
+@app.get("/api/{provider}/{query_type}", response_model=TimeseriesResponse)
 async def query_timeseries_get(
         background_tasks: BackgroundTasks,
         provider: str = Path(..., description="Provider name, e.g., 'province'"),
+        query_type: str = Path(..., description="Type of query, must be either timeseries to return a longer timeseries, or latest to return the latest measurement."),
         station_id: str = Query(..., description="External station id"),
         start_date: Optional[datetime] = Query(None, description="ISO datetime; e.g. 2025-01-15T10:30:00Z"),
         end_date: Optional[datetime] = Query(None, description="ISO datetime; e.g. 2025-01-15T12:30:00+01:00"),
@@ -113,13 +114,21 @@ async def query_timeseries_get(
         ),
         workflow: QueryWorkflow = Depends(get_workflow),
     ):
-    # Support comma-separated fallback (besides repeated ?variables=)
-    if variables and len(variables) == 1 and "," in variables[0]:
-        variables = [v.strip() for v in variables[0].split(",") if v.strip()]
 
     provider_handler = runtime.provider_manager.get_provider(provider.lower())
     if provider_handler is None:
         raise HTTPException(status_code=400, detail=f"No provider named {provider} found. Choose one of {runtime.provider_manager.list_providers()}")
+
+    if query_type.lower() not in ['timeseries', 'latest']:
+        raise HTTPException(status_code=400, detail=f"Invalid query type: {query_type}. Must be one of 'timeseries' or 'latest'.")
+    latest = query_type.lower() == 'latest'
+
+    if latest and (start_date is not None or end_date is not None):
+        raise HTTPException(status_code=400, detail="start_date and end_date not allowed for query type latest.")
+
+    # Support comma-separated fallback (besides repeated ?variables=)
+    if variables and len(variables) == 1 and "," in variables[0]:
+        variables = [v.strip() for v in variables[0].split(",") if v.strip()]
 
     try:
         q = TimeseriesQuery(
@@ -134,8 +143,8 @@ async def query_timeseries_get(
         raise HTTPException(status_code=400, detail=str(e))
 
     try:
-        response, pending = await workflow.run_timeseries_query(q)
-        if pending is not None and not pending.empty:
+        response, pending = await workflow.run_timeseries_query(q, latest = latest)
+        if pending is not None and not pending.empty and not latest:
             if provider_handler.cache_data:
                 background_tasks.add_task(runtime.db.insert_data, pending, provider_handler)
         return response

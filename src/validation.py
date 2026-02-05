@@ -73,6 +73,16 @@ class TimeseriesResponse(BaseModel):
             )
 
         if latest:
+            # Drop rows where all observation columns are NaN; keep metadata like station_id
+            obs_cols = [c for c in df.columns if c not in {"station_id", "datetime"}]
+            df = df.dropna(subset=obs_cols, how="all")
+            if df.empty:
+                return cls(
+                    data = [],
+                    count = 0,
+                    time_range = None,
+                    metadata = None
+                )
             df = df.sort_index().iloc[[-1]]
 
         df_out = df.copy()
