@@ -28,36 +28,26 @@ class QueryManager:
         is_last: bool
     ):
         try:
-            gap_index = pd.date_range(
-                start=pd.Timestamp(start_gap),
-                end=pd.Timestamp(end_gap),
-                freq=provider_handler.freq,
-                inclusive='both'
-            )
-
-            if gap_index.empty:
-                return None, gap_index
-            
             logger.debug(f"Fetching data gap for station {station_id} (provider={provider_handler.provider_name}) from {start_gap:%Y-%m-%d %H:%M:%S} to {end_gap:%Y-%m-%d %H:%M:%S}")
             
             provider_inclusion = provider_handler.inclusive
             if provider_inclusion == 'left' and is_last:
-                end_gap = end_gap + pd.Timedelta(provider_handler.freq)
+                end_gap_ext = end_gap + pd.Timedelta(provider_handler.freq)
             if provider_inclusion == 'right' and is_first:
-                start_gap = start_gap - pd.Timedelta(provider_handler.freq)
+                start_gap_ext = start_gap - pd.Timedelta(provider_handler.freq)
 
             async with self._semaphore:
                 provider_data = await provider_handler.run(
-                    start=start_gap,
-                    end=end_gap,
+                    start=start_gap_ext,
+                    end=end_gap_ext,
                     data_type='meteo',
                     station_id=station_id
                 )
 
-            return provider_data, gap_index
+            return provider_data, start_gap, end_gap
         except Exception as e:
             logger.exception(f"Error fetching data from {start_gap} to {end_gap} for {provider_handler.provider_name}: {e}")
-            return None, None
+            return None, start_gap, end_gap
             
     async def _fetch_missing_data(
         self,
@@ -75,38 +65,39 @@ class QueryManager:
         n = len(gaps)
         async with provider_handler as prv:
             tasks = []
-            task_meta: dict[asyncio.Task, tuple[datetime, datetime]] = {}
             for i, (start_gap, end_gap) in enumerate(gaps):
+                
+                if start_gap is None or end_gap is None:
+                    logger.warning("Found gap with start or end date missing. Skipping data fetch")
+                    continue
+
+                if start_gap >= end_gap:
+                    logger.warning(f"Start gap must be before end gap. Got {start_gap}-{end_gap}. Skipping data fetch")
+                    continue
+                
                 is_last = i == n - 1
-                is_first = i == 0            
+                is_first = i == 0
+
                 task = asyncio.create_task(
                     self._create_fetch_task(station_id, prv, start_gap, end_gap, is_first, is_last)
                 )
+
                 tasks.append(task)
-                task_meta[task] = (start_gap, end_gap)
 
             for task in asyncio.as_completed(tasks):
                 try:
-                    provider_data, gap_index = await task
-                    start_gap, end_gap = task_meta.get(task, (None, None))
-                    if gap_index is None:
-                        if start_gap is not None and end_gap is not None:
-                            gap_index = pd.date_range(
-                                start=pd.Timestamp(start_gap),
-                                end=pd.Timestamp(end_gap),
-                                freq=prv.freq,
-                                inclusive="both",
-                            )
-                        else:
-                            gap_index = pd.DatetimeIndex([])
+                    provider_data, start_gap, end_gap = await task
+                    
+                    #Create daterange to make sure all requested timestamps are present in provider_data
+                    gap_index = pd.date_range(
+                        start=pd.Timestamp(start_gap),
+                        end=pd.Timestamp(end_gap),
+                        freq=prv.freq,
+                        inclusive="both",
+                    )
 
                     if provider_data is None or provider_data.empty:
-                        if len(gap_index) > 0:
-                            logger.warning(f"No data returned for {gap_index[0]} - {gap_index[-1]}")
-                        elif start_gap is not None and end_gap is not None:
-                            logger.warning(f"No data returned for {start_gap} - {end_gap}")
-                        else:
-                            logger.warning("No data returned from query")
+                        logger.warning(f"No data returned for {start_gap} - {end_gap}")
 
                         if all_variables and len(gap_index) > 0:
                             placeholder = pd.DataFrame({
@@ -120,7 +111,7 @@ class QueryManager:
 
                     #Add missing timestamps
                     provider_data.set_index('datetime', inplace=True)
-                    provider_data = provider_data[~provider_data.index.duplicated(keep='last')]
+                    provider_data = provider_data[~provider_data.index.duplicated(keep='last')] #remove potential overlaps in data gaps
                     provider_data = provider_data.reindex(gap_index) #maybe use a tolerance here that equals freq?
 
                     #Add missing variables
@@ -133,13 +124,9 @@ class QueryManager:
 
                     all_data.append(provider_data)
                 except Exception as e:
-                    start_gap, end_gap = task_meta.get(task, (None, None))
-                    if start_gap is not None and end_gap is not None:
-                        logger.exception(
-                            f"Error processing data for {start_gap} - {end_gap} from {provider_handler.provider_name}: {e}"
-                        )
-                    else:
-                        logger.exception(f"Error processing data from {provider_handler.provider_name}: {e}")
+                    logger.exception(
+                        f"Error processing data for {start_gap} - {end_gap} from {provider_handler.provider_name}: {e}"
+                    )
                     continue
         
         if all_data:
@@ -147,6 +134,7 @@ class QueryManager:
             result.sort_values('datetime', inplace=True)
             # result.reset_index(drop=True, inplace=True)
             return result
+            
         return pd.DataFrame()
     
     async def get_data(
