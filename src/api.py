@@ -3,7 +3,7 @@ FastAPI integration example for the MeteoDB timeseries database.
 This demonstrates how to expose the database via REST API for fast access to cached meteo data.
 """
 
-from fastapi import FastAPI, HTTPException, Depends, Query, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, Query, Path, BackgroundTasks
 from fastapi.responses import JSONResponse
 
 from datetime import datetime
@@ -96,10 +96,10 @@ async def get_stations(provider: str):
         logger.error(f"Failed to get stations for provider {provider}: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve stations")
 
-@app.get("/api/timeseries", response_model=TimeseriesResponse)
+@app.get("/api/{provider}/timeseries", response_model=TimeseriesResponse)
 async def query_timeseries_get(
         background_tasks: BackgroundTasks,
-        provider: str = Query(..., description="Provider name, e.g., 'SBR'"),
+        provider: str = Path(..., description="Provider name, e.g., 'province'"),
         station_id: str = Query(..., description="External station id"),
         start_date: Optional[datetime] = Query(None, description="ISO datetime; e.g. 2025-01-15T10:30:00Z"),
         end_date: Optional[datetime] = Query(None, description="ISO datetime; e.g. 2025-01-15T12:30:00+01:00"),
@@ -117,6 +117,10 @@ async def query_timeseries_get(
     if variables and len(variables) == 1 and "," in variables[0]:
         variables = [v.strip() for v in variables[0].split(",") if v.strip()]
 
+    provider_handler = runtime.provider_manager.get_provider(provider.lower())
+    if provider_handler is None:
+        raise HTTPException(status_code=400, detail=f"No provider named {provider} found. Choose one of {runtime.provider_manager.list_providers()}")
+
     try:
         q = TimeseriesQuery(
             provider=provider,
@@ -132,8 +136,8 @@ async def query_timeseries_get(
     try:
         response, pending = await workflow.run_timeseries_query(q)
         if pending is not None and not pending.empty:
-            provider_handler = runtime.provider_manager.get_provider(provider.lower())
-            background_tasks.add_task(runtime.db.insert_data, pending, provider_handler)
+            if provider_handler.cache_data:
+                background_tasks.add_task(runtime.db.insert_data, pending, provider_handler)
         return response
     except HTTPException:
         raise

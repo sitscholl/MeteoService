@@ -43,10 +43,10 @@ class QueryWorkflow:
                 variables=query.variables,
             )
             pending = None
-            # if not df.empty:
-            #     pending = df.reset_index()
-            #     if "datetime" not in pending.columns:
-            #         pending = pending.rename(columns={"index": "datetime"})
+            if not df.empty:
+                pending = df.reset_index()
+                if "datetime" not in pending.columns:
+                    pending = pending.rename(columns={"index": "datetime"})
         else:
             if end_time is None:
                 end_time = datetime.now(tz)
@@ -54,7 +54,7 @@ class QueryWorkflow:
                 end_time = tz.localize(end_time)
 
             if start_time is None:
-                start_time = end_time - timedelta(minutes=self.latest_window_minutes)
+                start_time = end_time - timedelta(minutes=provider_handler.latest_window_minutes)
             elif start_time.tzinfo is None:
                 start_time = tz.localize(start_time)
 
