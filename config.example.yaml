@@ -1,19 +1,18 @@
 # Configuration for meteorological data providers
 providers:
   sbr:
-    class: src.meteo.SBR.SBRMeteo
     username: "user"
     password: "pwd"
     timezone: 'Europe/Rome'
     chunk_size_days: 7  # Size of chunks when fetching data
     latest_window_minutes: 60  # Window for provider-only latest lookup
+    cache_data: true # wheter to cache data in database for faster retrieval
   province:
-    class: src.meteo.province.ProvinceMeteo
     timezone: "Europe/Rome"
-    chunk_size_days: 365  # Size of chunks when fetching data
-    latest_window_minutes: 60  # Window for provider-only latest lookup
+    chunk_size_days: 365
+    latest_window_minutes: 60
+    cache_data: true
   open-meteo:
-    class: src.meteo.open_meteo.OpenMeteo
     timezone: "UTC"
     chunk_size_days: 365
     locations: 
