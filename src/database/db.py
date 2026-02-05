@@ -71,6 +71,7 @@ class MeteoDB:
                     models.Measurement.datetime.label("datetime"),
                     models.Measurement.value.label("value"),
                     models.Station.external_id.label("station_id"),
+                    models.Measurement.model.label('model'),
                     models.Variable.name.label("variable"),
                     models.Station.provider.label("provider"),
                 )
@@ -107,8 +108,8 @@ class MeteoDB:
                 if df['datetime'].tz is None:
                     df['datetime'] = df['datetime'].tz_localize('UTC')
 
-            df = df.pivot(columns = 'variable', values = 'value', index = ['station_id', 'datetime'])
-            df.reset_index(level = 0, inplace = True)
+            df = df.pivot(columns = 'variable', values = 'value', index = ['station_id', 'model', 'datetime'])
+            df.reset_index(level = [0,1], inplace = True)
 
         return df
 
@@ -189,22 +190,18 @@ class MeteoDB:
         Insert measurement data into the database. All columns other than 'datetime' and 'station_id' are assumed to contain variables and will be inserted into the Measurement table.
         Stations and variables which do not exist in the database will be created automatically in the respective tables.
 
-        Expected DataFrame columns:
+        Expected DataFrame id columns:
         - 'datetime': Measurement timestamp
         - 'station_id': External id of the station
+        - 'model': Name of the weather model or constant string in case of historical data.
 
-        Optional attrs for station creation:
-        - 'station_name', 'latitude', 'longitude', 'elevation'
-
-        Optional attrs for variable creation:
-        - 'variable_unit', 'variable_description'
         """
         if data.empty:
             logger.warning("Empty DataFrame provided to insert_data")
             return
 
         # Validate required columns
-        required_cols = ['datetime', 'station_id']
+        required_cols = ['datetime', 'station_id', 'model']
         missing_cols = [col for col in required_cols if col not in data.columns]
         if missing_cols:
             raise ValueError(f"Missing required columns: {missing_cols}")
@@ -249,7 +246,7 @@ class MeteoDB:
         # Drop any variable columns that failed to register
         active_variables = list(variable_id_map.keys())
 
-        measurements = df[['datetime', 'station_id'] + active_variables].copy()
+        measurements = df[['datetime', 'station_id', 'model'] + active_variables].copy()
 
         try:
             if measurements['datetime'].dt.tz is None:
@@ -262,7 +259,7 @@ class MeteoDB:
 
         # Convert wide table (one column per variable) into long form for bulk insert
         measurements = measurements.melt(
-            id_vars=['datetime', 'station_id'],
+            id_vars=['datetime', 'station_id', 'model'],
             value_vars=active_variables,
             var_name='variable',
             value_name='value'
@@ -281,7 +278,7 @@ class MeteoDB:
             return
 
         # Ensure column order matches the measurements table definition
-        measurements = measurements[['station_id', 'variable_id', 'datetime', 'value']]
+        measurements = measurements[['station_id', 'variable_id', 'datetime', 'model', 'value']]
 
         try:
             measurements.to_sql(

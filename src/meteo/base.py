@@ -147,7 +147,8 @@ class BaseMeteoHandler(ABC):
         return pa.DataFrameSchema(
             {
                 "datetime": pa.Column(pd.DatetimeTZDtype(tz="UTC")),
-                "station_id": pa.Column(str),
+                "station_id": pa.Column(str, nullable = False),
+                "model": pa.Column(str, nullable = False),
 
                 "tair_2m": pa.Column(float, nullable=True, required = False),                           # Temperature 2m
                 "tsoil_25cm": pa.Column(float, nullable=True, required=False),     # Soil temperature -25cm

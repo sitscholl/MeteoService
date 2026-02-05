@@ -173,30 +173,19 @@ class OpenMeteo(BaseMeteoHandler):
             logger.warning("Found duplicates for ['time', 'station_id']. They will be dropped")
             df_prepared.drop_duplicates(subset = ['time', 'station_id'], inplace = True)
 
-        # Rename columns, handling multi-model suffixes if present
-        new_columns: dict[str, str] = {}
+        # Extract model name from column and then stack model level into rows
         models = self._last_queried_models or []
-        for col in df_prepared.columns:
-            match_found = False
-            for m in sorted(models, key=len, reverse=True):
-                if col.endswith(f"_{m}"):
-                    base = col[: -len(m) - 1]
-                    if base in _OPENMETEO_HOURLY_RENAME:
-                        new_columns[col] = f"{_OPENMETEO_HOURLY_RENAME[base]}_{m}"
-                        match_found = True
-                        break
-                    else:
-                        logger.warning(
-                            f"Unrecognized Open-Meteo parameter '{base}' for model '{m}'. Keeping original column '{col}'."
-                        )
-                        match_found = True
-                        break
-            if not match_found and col in _OPENMETEO_HOURLY_RENAME:
-                new_columns[col] = _OPENMETEO_HOURLY_RENAME[col]
 
-        if new_columns:
-            df_prepared.rename(columns=new_columns, inplace=True)
-
+        if len(models) == 1:
+            df_prepared['model'] = models[0]
+        else:
+            new_columns = self._split_columns(df_prepared.columns, models)
+            if new_columns:
+                df_prepared.columns = pd.MultiIndex.from_tuples(new_columns, names=['parameter', 'model'])
+                df_prepared = df_prepared.set_index([("time", ""), ("station_id", "")])
+                df_prepared.index.names = ["datetime", "station_id"]
+                df_prepared = df_prepared.stack(level="model").reset_index()
+            
         for col in df_prepared.columns:
             if col in {"datetime", "station_id"}:
                 continue
@@ -211,6 +200,39 @@ class OpenMeteo(BaseMeteoHandler):
             logger.error(f"Error transforming datetime: {e}")
 
         return df_prepared
+
+    def _split_columns(self, columns: list[str], models: list[str]):
+        new_columns: list[Tuple[str, str]] = []
+
+        for col in columns:
+            match_found = False
+
+            if col in {"time", "station_id"}:
+                new_columns.append((col, ""))
+                continue
+
+            for m in sorted(models, key=len, reverse=True):
+                if col.endswith(f"_{m}"):
+                    base = col[: -len(m) - 1]
+                    if base in _OPENMETEO_HOURLY_RENAME:
+                        new_columns.append((_OPENMETEO_HOURLY_RENAME[base], m))
+                        match_found = True
+                        break
+                    else:
+                        logger.warning(
+                            f"Unrecognized Open-Meteo parameter '{base}' for model '{m}'. Keeping original column '{col}'."
+                        )
+                        new_columns.append((base, m))
+                        match_found = True
+                        break
+            
+            if not match_found:
+                if col in _OPENMETEO_HOURLY_RENAME:
+                    new_columns.append((_OPENMETEO_HOURLY_RENAME[col], ''))
+                else:
+                    new_columns.append((col, ''))
+        
+        return new_columns
 
 if __name__ == '__main__':
 

@@ -41,9 +41,10 @@ class Measurement(Base):
     station_id = Column(Integer, ForeignKey("stations.id"), nullable=False)
     variable_id = Column(Integer, ForeignKey("variables.id"), nullable=False)
     datetime = Column(DateTime, nullable=False)
+    model = Column(String, nullable = False)
     value = Column(Float)
 
     station = relationship("Station", back_populates="measurements")
     variable = relationship("Variable", back_populates="measurements")
 
-    __table_args__ = (UniqueConstraint("station_id", "variable_id", "datetime"), )
+    __table_args__ = (UniqueConstraint("station_id", "variable_id", "datetime", "model"), )

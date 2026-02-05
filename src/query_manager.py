@@ -1,13 +1,14 @@
 import pandas as pd
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 import asyncio
 
 from .database.db import MeteoDB
 from .meteo.base import BaseMeteoHandler
 from .gapfinder import Gapfinder
+from .utils import reindex_by_date
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class QueryManager:
         try:
             logger.debug(f"Fetching data gap for station {station_id} (provider={provider_handler.provider_name}) from {start_gap:%Y-%m-%d %H:%M:%S} to {end_gap:%Y-%m-%d %H:%M:%S}")
             
+            start_gap_ext = start_gap, end_gap_ext = end_gap
             provider_inclusion = provider_handler.inclusive
             if provider_inclusion == 'left' and is_last:
                 end_gap_ext = end_gap + pd.Timedelta(provider_handler.freq)
@@ -102,25 +104,24 @@ class QueryManager:
                         if all_variables and len(gap_index) > 0:
                             placeholder = pd.DataFrame({
                                 'datetime': gap_index,
-                                'station_id': station_id
+                                'station_id': station_id,
                             })
                             for column in all_variables:
                                 placeholder[column] = pd.NA
                             all_data.append(placeholder)
                         continue
 
-                    #Add missing timestamps
-                    provider_data.set_index('datetime', inplace=True)
-                    provider_data = provider_data[~provider_data.index.duplicated(keep='last')] #remove potential overlaps in data gaps
-                    provider_data = provider_data.reindex(gap_index) #maybe use a tolerance here that equals freq?
+                    provider_data.drop_duplicates(subset = ['datetime', 'station_id', 'model'], inplace = True) #remove potential overlaps in data gaps
+                    
+                    ## Reindex to add missing timestamps
+                    provider_data.set_index('datetime', inplace = True)
+                    provider_data = provider_data.groupby(['station_id', 'model']).apply(reindex_by_date, freq = prv.freq)
+                    provider_data.reset_index(inplace = True)
 
                     #Add missing variables
                     for column in all_variables:
                         if column not in provider_data.columns:
                             provider_data[column] = pd.NA
-
-                    provider_data.reset_index(inplace=True)
-                    provider_data.rename(columns={'index': 'datetime'}, inplace=True)
 
                     all_data.append(provider_data)
                 except Exception as e:
@@ -132,7 +133,6 @@ class QueryManager:
         if all_data:
             result = pd.concat(all_data, ignore_index=True)
             result.sort_values('datetime', inplace=True)
-            # result.reset_index(drop=True, inplace=True)
             return result
             
         return pd.DataFrame()
@@ -254,7 +254,7 @@ class QueryManager:
 
     @staticmethod
     def _combine_existing_and_new(existing_data: pd.DataFrame, new_data: pd.DataFrame, target_tz) -> pd.DataFrame:
-        new_data_indexed = new_data.set_index('datetime').sort_index()
+        new_data_indexed = new_data.set_index(['datetime', 'station_id', 'model']).sort_index()
         if new_data_indexed.index.tz is None:
             new_data_indexed.index = new_data_indexed.index.tz_localize(timezone.utc)
         new_data_indexed.index = new_data_indexed.index.tz_convert(target_tz)
@@ -262,7 +262,9 @@ class QueryManager:
         if existing_data.empty:
             return new_data_indexed
 
-        existing_sorted = existing_data.sort_index()
-        combined = pd.concat([existing_sorted, new_data_indexed])
+        existing_indexed = existing_data.set_index(['station_id', 'model'], append = True).sort_index()
+
+        combined = pd.concat([existing_indexed, new_data_indexed])
         combined = combined[~combined.index.duplicated(keep='last')]
+        
         return combined

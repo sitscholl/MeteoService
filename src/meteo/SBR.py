@@ -318,7 +318,9 @@ class SBRMeteo(BaseMeteoHandler):
             if col_drop in raw_data.columns:
                 raw_data.drop(columns = col_drop, inplace = True)
             
-        return raw_data.rename(columns = SBR_RENAME)
+        raw_data = raw_data.rename(columns = SBR_RENAME)
+        raw_data['model'] = 'observation'
+        return raw_data
 
     def _extract_data_from_response(
         self,
