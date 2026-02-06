@@ -85,9 +85,9 @@ class OpenMeteo(BaseMeteoHandler):
             data_params: Dict[str, Any] = {
                 "latitude": lat,
                 "longitude": lon,
-                "hourly": sensors,
+                "hourly": ','.join(sensors),
                 "timezone": self.timezone,
-                "models": models
+                "models": ','.join(models)
             }
             if start is not None:
                 data_params["start_date"] = pd.Timestamp(start).strftime("%Y-%m-%d")
@@ -178,6 +178,7 @@ class OpenMeteo(BaseMeteoHandler):
 
         if len(models) == 1:
             df_prepared['model'] = models[0]
+            df_prepared.rename(columns =_OPENMETEO_HOURLY_RENAME, inplace = True)
         else:
             new_columns = self._split_columns(df_prepared.columns, models)
             if new_columns:

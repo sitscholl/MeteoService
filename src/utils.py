@@ -51,3 +51,14 @@ def split_dates(start_date, end_date, freq, n_days=7, split_on_year=False):
 def reindex_by_date(df, freq: str):
     dates = pd.date_range(df.index.min(), df.index.max(), freq = freq)
     return df.reindex(dates)
+
+def str_to_list(x):
+    if isinstance(x, str):
+        return [x]
+    else:
+        return x
+
+def split_url_parameters(x):
+    if len(x) == 1 and "," in x[0]:
+        return [v.strip() for v in x[0].split(",") if v.strip()]
+    return x

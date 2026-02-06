@@ -8,7 +8,7 @@ import asyncio
 from .database.db import MeteoDB
 from .meteo.base import BaseMeteoHandler
 from .gapfinder import Gapfinder
-from .utils import reindex_by_date
+from .utils import reindex_by_date, str_to_list
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +26,13 @@ class QueryManager:
         start_gap: datetime,
         end_gap: datetime,
         is_first: bool,
-        is_last: bool
+        is_last: bool,
+        models: list[str] | None
     ):
         try:
             logger.debug(f"Fetching data gap for station {station_id} (provider={provider_handler.provider_name}) from {start_gap:%Y-%m-%d %H:%M:%S} to {end_gap:%Y-%m-%d %H:%M:%S}")
             
-            start_gap_ext = start_gap, end_gap_ext = end_gap
+            start_gap_ext, end_gap_ext = start_gap, end_gap
             provider_inclusion = provider_handler.inclusive
             if provider_inclusion == 'left' and is_last:
                 end_gap_ext = end_gap + pd.Timedelta(provider_handler.freq)
@@ -43,7 +44,8 @@ class QueryManager:
                     start=start_gap_ext,
                     end=end_gap_ext,
                     data_type='meteo',
-                    station_id=station_id
+                    station_id=station_id,
+                    models = models
                 )
 
             return provider_data, start_gap, end_gap
@@ -56,7 +58,8 @@ class QueryManager:
         provider_handler: BaseMeteoHandler,
         station_id: str,
         gaps: List[Tuple[datetime, datetime]] | None,
-        all_variables: List[str]
+        all_variables: List[str],
+        models: list[str] | None = None
     ) -> pd.DataFrame:
         """Fetch and align missing data from the specified provider. Also makes sure that missing timestamps are included by filling with NA"""
         
@@ -81,7 +84,7 @@ class QueryManager:
                 is_first = i == 0
 
                 task = asyncio.create_task(
-                    self._create_fetch_task(station_id, prv, start_gap, end_gap, is_first, is_last)
+                    self._create_fetch_task(station_id, prv, start_gap, end_gap, is_first, is_last, models = models)
                 )
 
                 tasks.append(task)
@@ -102,13 +105,17 @@ class QueryManager:
                         logger.warning(f"No data returned for {start_gap} - {end_gap}")
 
                         if all_variables and len(gap_index) > 0:
-                            placeholder = pd.DataFrame({
-                                'datetime': gap_index,
-                                'station_id': station_id,
-                            })
-                            for column in all_variables:
-                                placeholder[column] = pd.NA
-                            all_data.append(placeholder)
+                            if models is None:
+                                models = ['']
+                            for model in models:
+                                placeholder = pd.DataFrame({
+                                    'datetime': gap_index,
+                                    'station_id': station_id,
+                                    'model': model
+                                })
+                                for column in all_variables:
+                                    placeholder[column] = pd.NA
+                                all_data.append(placeholder)
                         continue
 
                     provider_data.drop_duplicates(subset = ['datetime', 'station_id', 'model'], inplace = True) #remove potential overlaps in data gaps
@@ -144,7 +151,8 @@ class QueryManager:
             station_id: str,
             start_time: datetime,
             end_time: datetime, 
-            variables: Optional[List[str]] = None
+            variables: Optional[List[str]] = None,
+            model: Optional[str] = None
         ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Get data from database and fetch missing data from providers if needed.
@@ -165,6 +173,10 @@ class QueryManager:
 
         if not isinstance(station_id, str):
             station_id = str(station_id)
+        
+        model = str_to_list(model)
+        if model is not None and len(model) > 1:
+            raise NotImplementedError(f"Only a single model is supported for now. Got {model}")
 
         # Convert to UTC
         orig_timezone = start_time.tzinfo
@@ -186,7 +198,8 @@ class QueryManager:
             station_id=station_id,
             start_time=start_time_round,
             end_time=end_time_round,
-            variables=variables
+            variables=variables,
+            models = model
         )
 
         if not existing_data.empty:
@@ -210,7 +223,8 @@ class QueryManager:
             provider_handler=provider_handler,
             station_id=station_id,
             gaps=gaps,
-            all_variables = [] if existing_data.empty else [i for i in existing_data.columns if i not in {'station_id', 'datetime'}]
+            all_variables = [] if existing_data.empty else [i for i in existing_data.columns if i not in {'station_id', 'datetime'}],
+            models = model
         )
 
         if new_data.empty:
@@ -254,10 +268,12 @@ class QueryManager:
 
     @staticmethod
     def _combine_existing_and_new(existing_data: pd.DataFrame, new_data: pd.DataFrame, target_tz) -> pd.DataFrame:
+        
+        dt = new_data.datetime
+        if dt.tz is None:
+            dt = dt.tz_localize(timezone.utc)
+        new_data['datetime'] = dt.tz_convert(target_tz)
         new_data_indexed = new_data.set_index(['datetime', 'station_id', 'model']).sort_index()
-        if new_data_indexed.index.tz is None:
-            new_data_indexed.index = new_data_indexed.index.tz_localize(timezone.utc)
-        new_data_indexed.index = new_data_indexed.index.tz_convert(target_tz)
 
         if existing_data.empty:
             return new_data_indexed

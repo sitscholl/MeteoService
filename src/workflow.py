@@ -52,6 +52,7 @@ class QueryWorkflow:
             start_time=query.start_time,
             end_time=query.end_time,
             variables=query.variables,
+            models=query.models
         )
 
         station = self.runtime.db.query_station(provider=provider_handler.provider_name, external_id=query.station_id)

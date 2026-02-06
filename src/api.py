@@ -15,6 +15,7 @@ from . import validation as validation_module
 from .validation import TimeseriesResponse, TimeseriesQuery
 from .runtime import RuntimeContext
 from .workflow import QueryWorkflow
+from .utils import split_url_parameters
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,10 @@ async def query_timeseries_get(
             None,
             description="Repeat param for multiple, e.g. ?variables=tmp&variables=hum. Also accepts comma-separated.",
         ),
+        models: Optional[List[str]] = Query(
+            None,
+            description="Repeat param for multiple, e.g. ?models=model1&models=model2. Also accepts comma-separated.",
+        ),
         timezone: Optional[str] = Query(
             None,
             description="Timezone for naive datetimes, e.g. 'Europe/Rome'. Ignored if start/end include tzinfo.",
@@ -127,8 +132,10 @@ async def query_timeseries_get(
         raise HTTPException(status_code=400, detail="start_date and end_date not allowed for query type latest.")
 
     # Support comma-separated fallback (besides repeated ?variables=)
-    if variables and len(variables) == 1 and "," in variables[0]:
-        variables = [v.strip() for v in variables[0].split(",") if v.strip()]
+    if variables:
+        variables = split_url_parameters(variables)
+    if models:
+        models = split_url_parameters(models)
 
     try:
         q = TimeseriesQuery(
@@ -137,6 +144,7 @@ async def query_timeseries_get(
             start_time=start_date,
             end_time=end_date,
             variables=variables,
+            models = models,
             timezone=timezone or DEFAULT_TIMEZONE,
         )
     except Exception as e:

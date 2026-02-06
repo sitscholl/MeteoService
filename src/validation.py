@@ -14,6 +14,7 @@ class TimeseriesQuery(BaseModel):
     end_time: Optional[datetime] = Field(None, description="End time (ISO format with timezone, e.g., '2025-01-15T10:30:00+01:00')")
     station_id: str = Field(..., description="External id of the station to return")
     variables: Optional[List[str]] = Field(None, description="Specific variables to return")
+    models: Optional[List[str]] = Field(None, description= "Weather models to return")
     timezone: Optional[str] = Field(None, description="Timezone for naive datetimes (e.g., 'Europe/Rome'). Only used if start_time/end_time are timezone-naive.")
 
     @field_validator('start_time', 'end_time', mode='before')
