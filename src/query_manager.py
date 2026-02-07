@@ -125,7 +125,7 @@ class QueryManager:
                         provider_data
                         .set_index(['station_id', 'model', 'datetime'])
                         .groupby(level=['station_id', 'model'], sort=False, group_keys=False)
-                        .apply(reindex_group, freq=prv.freq)
+                        .apply(reindex_group, freq=prv.freq, dt_start = gap_index.min(), dt_end = gap_index.max())
                         .reset_index()
                     )
 
