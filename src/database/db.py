@@ -59,7 +59,7 @@ class MeteoDB:
             start_time: datetime,
             end_time: datetime,
             variables: list[str] | None = None,
-            models: list[str] | None = None
+            weather_models: list[str] | None = None
         ):
 
         orig_timezone = start_time.tzinfo
@@ -98,9 +98,9 @@ class MeteoDB:
                     models.Measurement.variable_id.in_(variables_ids)
                 )
 
-            if models is not None:
+            if weather_models is not None:
                 query = query.filter(
-                    models.Measurement.model.in_(models)
+                    models.Measurement.model.in_(weather_models)
                 )
 
             df = pd.read_sql_query(sql=query.statement, con=self.engine)
