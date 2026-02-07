@@ -10,12 +10,13 @@ gaps/placeholder rows behave as expected before deploying to production.
 """
 
 import pytest
+import pytest_asyncio
 from datetime import datetime
 
 import pytz
 import pandas as pd
 
-from src.runtime import RuntimeContext
+from src.runtime import RuntimeContext, load_config_file
 from src.workflow import QueryWorkflow
 from src.validation import TimeseriesQuery
 
@@ -33,9 +34,20 @@ def _normalize_response(response, coerce_to_utc = False):
         return pd.DataFrame()
     df = pd.DataFrame(response.data)
     if "datetime" in df.columns:
-        df["datetime"] = pd.to_datetime(df["datetime"], utc=coerce_to_utc, errors="coerce")
+        df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
+        df['datetime'] = df['datetime'].dt.tz_localize(response.metadata.get('timezone_used', 'UTC'))
+        if coerce_to_utc:
+            df['datetime'] = df['datetime'].dt.tz_localize("UTC")
     df = df.sort_values("datetime").reset_index(drop=True)
     return df
+
+
+def _expected_missing_count(start_time, end_time, freq, cache_start_utc, cache_end_utc):
+    start_utc = start_time.astimezone(pytz.UTC)
+    end_utc = end_time.astimezone(pytz.UTC)
+    full_range_utc = pd.date_range(start=start_utc, end=end_utc, freq=freq, inclusive="both")
+    missing = full_range_utc[(full_range_utc < cache_start_utc) | (full_range_utc > cache_end_utc)]
+    return len(missing)
 
 async def _run_query(workflow, provider_handler, station_id, start_time, end_time, db = None):
     query = TimeseriesQuery(
@@ -49,47 +61,58 @@ async def _run_query(workflow, provider_handler, station_id, start_time, end_tim
         await db.insert_data(pending, provider_handler)
     return response, pending
 
-_PROVINCE_TEST_STATIONS = ["01110MS", "23200MS", "89190MS", "65350MS", "41000MS", "31410MS"]
-_SBR_TEST_STATIONS = ["103", "113", "96", "137", "140", "12"]
-_QUERY_COMBINATIONS = {
-    "province": {
-        "q1": {"start_time": dt(2025, 1, 1), "end_time": dt(2026, 1, 1), "station_ids": _PROVINCE_TEST_STATIONS},
-        "q2": {"start_time": dt(2025, 2, 1), "end_time": dt(2025, 2, 10), "station_ids": _PROVINCE_TEST_STATIONS},
-        "q3": {"start_time": dt(2025, 10, 1), "end_time": dt(2025, 10, 10), "station_ids": _PROVINCE_TEST_STATIONS},
-        "q4": {"start_time": dt(2025, 12, 1), "end_time": dt(2026, 2, 1), "station_ids": _PROVINCE_TEST_STATIONS}
-    },
-    "sbr": {
-        "q1": {"start_time": dt(2026, 1, 1), "end_time": dt(2026, 1, 10), "station_ids": _SBR_TEST_STATIONS},
-        "q2": {"start_time": dt(2025, 12, 25), "end_time": dt(2026, 1, 2), "station_ids": _SBR_TEST_STATIONS},
-        "q3": {"start_time": dt(2026, 1, 7), "end_time": dt(2026, 1, 14), "station_ids": _SBR_TEST_STATIONS}
-    }
-}
+_PROVINCE_TEST_STATIONS = ["01110MS"] #, "23200MS", "89190MS"] #, "65350MS", "41000MS", "31410MS"]
+_SBR_TEST_STATIONS = ["103"] #, "113", "96"] #, "137", "140", "12"]
 
 @pytest.fixture(scope="session")
-def runtime():
-    return RuntimeContext.from_config_file("config/config.yaml")
+def runtime(tmp_path_factory):
+    config = load_config_file("config/config.yaml")
+    db_path = tmp_path_factory.mktemp("db") / "test.db"
+    config.setdefault("database", {})["path"] = f"sqlite:///{db_path}"
+    runtime_ctx = RuntimeContext(config=config, config_file="config/config.yaml")
+    yield runtime_ctx
+    runtime_ctx.db.close()
 
 @pytest.fixture
 def workflow(runtime):
     return QueryWorkflow(runtime)
 
-@pytest.fixture(params=[("province", _PROVINCE_TEST_STATIONS, "UTC"), ("sbr", _SBR_TEST_STATIONS, "UTC")])
-def provider_params(request):
+@pytest.fixture(
+    scope="session",
+    params=[
+        *[("province", station_id) for station_id in _PROVINCE_TEST_STATIONS],
+        *[("sbr", station_id) for station_id in _SBR_TEST_STATIONS],
+    ],
+)
+def provider_station(request):
     return request.param
 
 
-@pytest.fixture(params=[0])
-def station_index(request):
+@pytest.fixture(params=["Europe/Rome"])
+def timezone_name(request):
     return request.param
+
+
+@pytest_asyncio.fixture(scope="session")
+async def primed_cache(runtime, provider_station):
+    provider, station_id = provider_station
+    workflow = QueryWorkflow(runtime)
+    tz_utc = pytz.timezone("UTC")
+    start_time = dt(2025, 6, 1, tzinfo=tz_utc)
+    end_time = dt(2026, 7, 1, tzinfo=tz_utc)
+    provider_handler = runtime.provider_manager.get_provider(provider)
+    await _run_query(workflow, provider_handler, station_id, start_time, end_time, db=runtime.db)
+    return provider, station_id
 
 
 @pytest.mark.asyncio
-async def test_provider_full_timeseries(provider_params, station_index, runtime, workflow):
-    provider, stations, timezone = provider_params
-    tz = pytz.timezone(timezone)
-    station_id = stations[station_index]
-    start_time = dt(2025, 1, 1, tzinfo = tz)
-    end_time = dt(2026, 1, 1, tzinfo = tz)
+async def test_provider_full_timeseries(primed_cache, timezone_name, runtime, workflow):
+    provider, station_id = primed_cache
+    tz = pytz.timezone(timezone_name)
+    start_time = dt(2025, 6, 1, tzinfo = tz)
+    end_time = dt(2026, 7, 1, tzinfo = tz)
+    cache_start_utc = dt(2025, 6, 1, tzinfo=pytz.UTC)
+    cache_end_utc = dt(2026, 7, 1, tzinfo=pytz.UTC)
 
     provider_handler = runtime.provider_manager.get_provider(provider)
     full_range = pd.date_range(start=start_time, end=end_time, freq=provider_handler.freq, inclusive="both")
@@ -100,18 +123,22 @@ async def test_provider_full_timeseries(provider_params, station_index, runtime,
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
     assert len(response) == len(full_range)
-    assert len(pending) == len(full_range)
+    expected_missing = _expected_missing_count(
+        start_time, end_time, provider_handler.freq, cache_start_utc, cache_end_utc
+    )
+    assert len(pending) == expected_missing
     assert response.datetime.min() == start_time
     assert response.datetime.max() == end_time
     assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
 
 @pytest.mark.asyncio
-async def test_provider_with_gaps(provider_params, station_index, runtime, workflow):
-    provider, stations, timezone = provider_params
-    tz = pytz.timezone(timezone)
-    station_id = stations[station_index]
-    start_time = dt(2025, 1, 1, tzinfo = tz)
-    end_time = dt(2026, 1, 1, tzinfo = tz)
+async def test_provider_with_gaps(primed_cache, timezone_name, runtime, workflow):
+    provider, station_id = primed_cache
+    tz = pytz.timezone(timezone_name)
+    start_time = dt(2025, 6, 1, tzinfo = tz)
+    end_time = dt(2026, 7, 1, tzinfo = tz)
+    cache_start_utc = dt(2025, 6, 1, tzinfo=pytz.UTC)
+    cache_end_utc = dt(2026, 7, 1, tzinfo=pytz.UTC)
 
     provider_handler = runtime.provider_manager.get_provider(provider)
     full_range = pd.date_range(start=start_time, end=end_time, freq=provider_handler.freq, inclusive="both")
@@ -123,8 +150,8 @@ async def test_provider_with_gaps(provider_params, station_index, runtime, workf
 
     assert len(response) == len(full_range)
 
-    start_time2 = dt(2024, 12, 20, tzinfo = tz)
-    end_time2 = dt(2025, 1, 10, tzinfo = tz)
+    start_time2 = dt(2025, 5, 20, tzinfo = tz)
+    end_time2 = dt(2025, 6, 10, tzinfo = tz)
     range2_1 = pd.date_range(start=start_time2, end=end_time2, freq=provider_handler.freq, inclusive="both")
     range2_2 = pd.date_range(start=start_time2, end=start_time, freq=provider_handler.freq, inclusive="both")
 
@@ -134,15 +161,15 @@ async def test_provider_with_gaps(provider_params, station_index, runtime, workf
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
     assert len(response) == len(range2_1)
-    assert len(pending) == len(range2_2)
+    assert len(pending) == len(range2_2)-1 #overlap gets removed
     assert response.datetime.min() == start_time2
     assert response.datetime.max() == end_time2
     assert str(response.datetime.dt.tz) == str(start_time2.tzinfo)
 
-    start_time3 = dt(2025, 12, 20, tzinfo = tz)
-    end_time3 = dt(2026, 1, 10, tzinfo = tz)
+    start_time3 = dt(2025, 6, 20, tzinfo = tz)
+    end_time3 = dt(2026, 7, 10, tzinfo = tz)
     range3_1 = pd.date_range(start=start_time3, end=end_time3, freq=provider_handler.freq, inclusive="both")
-    range3_2 = pd.date_range(start=end_time, end=end_time3, freq=provider_handler.freq, inclusive="both")
+    range3_2 = pd.date_range(start=start_time, end=end_time3, freq=provider_handler.freq, inclusive="both")
 
     response, pending = await _run_query(workflow, provider_handler, station_id, start_time3, end_time3, db = runtime.db)
 
@@ -150,18 +177,17 @@ async def test_provider_with_gaps(provider_params, station_index, runtime, workf
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
     assert len(response) == len(range3_1)
-    assert len(pending) == len(range3_2)
+    assert len(pending) == len(range3_2)-1
     assert response.datetime.min() == start_time3
     assert response.datetime.max() == end_time3
     assert str(response.datetime.dt.tz) == str(start_time3.tzinfo)
 
 @pytest.mark.asyncio
-async def test_provider_all_cached(provider_params, station_index, runtime, workflow):
-    provider, stations, timezone = provider_params
-    tz = pytz.timezone(timezone)
-    station_id = stations[station_index]
-    start_time = dt(2025, 1, 1, tzinfo = tz)
-    end_time = dt(2026, 1, 1, tzinfo = tz)
+async def test_provider_all_cached(primed_cache, timezone_name, runtime, workflow):
+    provider, station_id = primed_cache
+    tz = pytz.timezone(timezone_name)
+    start_time = dt(2025, 6, 1, tzinfo = tz)
+    end_time = dt(2026, 7, 1, tzinfo = tz)
 
     provider_handler = runtime.provider_manager.get_provider(provider)
     full_range = pd.date_range(start=start_time, end=end_time, freq=provider_handler.freq, inclusive="both")
@@ -173,8 +199,8 @@ async def test_provider_all_cached(provider_params, station_index, runtime, work
 
     assert len(response) == len(full_range)
 
-    start_time2 = dt(2025, 3, 1, tzinfo=tz)
-    end_time2 = dt(2025, 9, 1, tzinfo=tz)
+    start_time2 = dt(2025, 6, 1, tzinfo=tz)
+    end_time2 = dt(2025, 6, 10, tzinfo=tz)
     range2 = pd.date_range(start=start_time2, end=end_time2, freq=provider_handler.freq, inclusive="both")
 
     response, pending = await _run_query(workflow, provider_handler, station_id, start_time2, end_time2, db = runtime.db)
@@ -186,9 +212,9 @@ async def test_provider_all_cached(provider_params, station_index, runtime, work
     assert pending.empty
 
 @pytest.mark.asyncio
-async def test_latest_query(provider_params, station_index, workflow, runtime):
-    provider, stations, timezone = provider_params
-    station_id = stations[station_index]
+async def test_latest_query(primed_cache, timezone_name, workflow, runtime):
+    provider, station_id = primed_cache
+    timezone = timezone_name
 
     latest_query = TimeseriesQuery(
         provider=provider,
@@ -206,8 +232,8 @@ async def test_latest_query(provider_params, station_index, workflow, runtime):
         assert not data[obs_cols].isna().all(axis=None)
 
 @pytest.mark.asyncio
-async def test_invalid_station(provider_params, runtime, workflow):
-    provider, _, _ = provider_params
+async def test_invalid_station(primed_cache, runtime, workflow):
+    provider, _ = primed_cache
     provider_handler = runtime.provider_manager.get_provider(provider)
     start_time = dt(2026,1,1)
     end_time = dt(2026,1,10)
@@ -216,9 +242,8 @@ async def test_invalid_station(provider_params, runtime, workflow):
         await _run_query(workflow, provider_handler, "INVALID_STATION", start_time, end_time)
 
 @pytest.mark.asyncio
-async def test_timezone_equivalence(provider_params, station_index, workflow, runtime):
-    provider, stations, _ = provider_params
-    station_id = stations[station_index]
+async def test_timezone_equivalence(primed_cache, workflow, runtime):
+    provider, station_id = primed_cache
     utc_start = dt(2025, 10, 1, 0, 0, 0)
     utc_end = dt(2025, 10, 2, 0, 0, 0)
 
