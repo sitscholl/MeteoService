@@ -1,5 +1,5 @@
 from unittest.mock import AsyncMock, patch
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import pandas as pd
 import pytest
@@ -156,3 +156,105 @@ def test_round_range_caps_future_end(manager):
 
     assert start_round == pd.Timestamp(start_time).floor("1h")
     assert end_round == pd.Timestamp(fixed_now).floor("1h")
+
+
+@pytest.mark.asyncio
+async def test_get_data_rejects_naive_datetimes(manager, provider):
+    start_time = datetime(2025, 1, 1, 0, 0, 0)
+    end_time = datetime(2025, 1, 1, 1, 0, 0)
+    db = FakeDB(pd.DataFrame())
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        await manager.get_data(
+            db=db,
+            provider_handler=provider,
+            station_id="STATION_1",
+            start_time=start_time,
+            end_time=end_time,
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_data_rejects_mismatched_timezones(manager, provider):
+    start_time = datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    end_time = datetime(2025, 1, 1, 1, 0, 0, tzinfo=timezone(timedelta(hours=1)))
+    db = FakeDB(pd.DataFrame())
+
+    with pytest.raises(ValueError, match="same timezone"):
+        await manager.get_data(
+            db=db,
+            provider_handler=provider,
+            station_id="STATION_1",
+            start_time=start_time,
+            end_time=end_time,
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_data_rejects_start_after_end(manager, provider):
+    start_time = dt_utc(2025, 1, 1, 2)
+    end_time = dt_utc(2025, 1, 1, 1)
+    db = FakeDB(pd.DataFrame())
+
+    with pytest.raises(ValueError, match="start_time must be before end_time"):
+        await manager.get_data(
+            db=db,
+            provider_handler=provider,
+            station_id="STATION_1",
+            start_time=start_time,
+            end_time=end_time,
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_data_returns_empty_when_range_smaller_than_freq(manager, provider):
+    db = FakeDB(pd.DataFrame())
+
+    start_time = dt_utc(2025, 1, 1, 0, 10)
+    end_time = dt_utc(2025, 1, 1, 0, 20)
+
+    combined, pending = await manager.get_data(
+        db=db,
+        provider_handler=provider,
+        station_id="STATION_1",
+        start_time=start_time,
+        end_time=end_time,
+    )
+
+    assert combined.empty
+    assert pending.empty
+    provider.run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_data_rejects_variables_filter(manager, provider):
+    db = FakeDB(pd.DataFrame())
+    start_time = dt_utc(2025, 1, 1, 0)
+    end_time = dt_utc(2025, 1, 1, 1)
+
+    with pytest.raises(NotImplementedError, match="Filtering by variables"):
+        await manager.get_data(
+            db=db,
+            provider_handler=provider,
+            station_id="STATION_1",
+            start_time=start_time,
+            end_time=end_time,
+            variables=["temp"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_data_rejects_multiple_models(manager, provider):
+    db = FakeDB(pd.DataFrame())
+    start_time = dt_utc(2025, 1, 1, 0)
+    end_time = dt_utc(2025, 1, 1, 1)
+
+    with pytest.raises(NotImplementedError, match="Only a single model"):
+        await manager.get_data(
+            db=db,
+            provider_handler=provider,
+            station_id="STATION_1",
+            start_time=start_time,
+            end_time=end_time,
+            models=["m1", "m2"],
+        )
