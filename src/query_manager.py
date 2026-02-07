@@ -273,10 +273,10 @@ class QueryManager:
     @staticmethod
     def _combine_existing_and_new(existing_data: pd.DataFrame, new_data: pd.DataFrame, target_tz) -> pd.DataFrame:
         
-        dt = new_data.datetime
-        if dt.tz is None:
-            dt = dt.tz_localize(timezone.utc)
-        new_data['datetime'] = dt.tz_convert(target_tz)
+        datetime_series = new_data.datetime
+        if datetime_series.dt.tz is None:
+            datetime_series = datetime_series.dt.tz_localize(timezone.utc)
+        new_data['datetime'] = datetime_series.dt.tz_convert(target_tz)
         new_data_indexed = new_data.set_index(['datetime', 'station_id', 'model']).sort_index()
 
         if existing_data.empty:

@@ -75,7 +75,7 @@ class TimeseriesResponse(BaseModel):
 
         if latest:
             # Drop rows where all observation columns are NaN; keep metadata like station_id
-            obs_cols = [c for c in df.columns if c not in {"station_id", "datetime"}]
+            obs_cols = [c for c in df.columns if c not in {"station_id", "datetime", "model"}]
             df = df.dropna(subset=obs_cols, how="all")
             if df.empty:
                 return cls(
@@ -104,7 +104,7 @@ class TimeseriesResponse(BaseModel):
         return cls(
             data=data,
             count=len(data),
-            time_range={"start": df.index.min(), "end": df.index.max()},
+            time_range={"start": df_out['datetime'].min(), "end": df_out['datetime'].max()},
             metadata=None,
         )
 
