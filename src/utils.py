@@ -48,16 +48,28 @@ def split_dates(start_date, end_date, freq, n_days=7, split_on_year=False):
     
     return date_pairs
 
-def reindex_group(g: pd.DataFrame, freq: str, dt_start: datetime.datetime | None = None, dt_end: datetime.datetime | None = None) -> pd.DataFrame:
-    dt = g.index.get_level_values('datetime')
+def reindex_group(
+    g: pd.DataFrame,
+    freq: str,
+    dt_start: datetime.datetime | None = None,
+    dt_end: datetime.datetime | None = None,
+) -> pd.DataFrame:
+    dt = g.index.get_level_values("datetime")
 
     if dt_start is None:
         dt_start = dt.min()
     if dt_end is None:
-        dt_end = dt.min
+        dt_end = dt.max()
 
-    full = pd.date_range(dt_start, dt_end, freq=freq, name='datetime')
-    return g.reindex(full, level='datetime')
+    full = pd.date_range(dt_start, dt_end, freq=freq, name="datetime")
+
+    station_id = g.index.get_level_values("station_id")[0]
+    model = g.index.get_level_values("model")[0]
+    full_index = pd.MultiIndex.from_product(
+        [[station_id], [model], full],
+        names=["station_id", "model", "datetime"],
+    )
+    return g.reindex(full_index)
 
 def str_to_list(x):
     if isinstance(x, str):
