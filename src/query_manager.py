@@ -8,7 +8,7 @@ import asyncio
 from .database.db import MeteoDB
 from .meteo.base import BaseMeteoHandler
 from .gapfinder import Gapfinder
-from .utils import reindex_by_date, str_to_list
+from .utils import reindex_group, str_to_list
 
 logger = logging.getLogger(__name__)
 
@@ -121,9 +121,13 @@ class QueryManager:
                     provider_data.drop_duplicates(subset = ['datetime', 'station_id', 'model'], inplace = True) #remove potential overlaps in data gaps
                     
                     ## Reindex to add missing timestamps
-                    provider_data.set_index('datetime', inplace = True)
-                    provider_data = provider_data.groupby(['station_id', 'model']).apply(reindex_by_date, freq = prv.freq)
-                    provider_data.reset_index(inplace = True)
+                    provider_data = (
+                        provider_data
+                        .set_index(['station_id', 'model', 'datetime'])
+                        .groupby(level=['station_id', 'model'], sort=False, group_keys=False)
+                        .apply(reindex_group, freq=prv.freq)
+                        .reset_index()
+                    )
 
                     #Add missing variables
                     for column in all_variables:
@@ -152,7 +156,7 @@ class QueryManager:
             start_time: datetime,
             end_time: datetime, 
             variables: Optional[List[str]] = None,
-            model: Optional[str] = None
+            models: Optional[List[str]] = None
         ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Get data from database and fetch missing data from providers if needed.
@@ -174,9 +178,9 @@ class QueryManager:
         if not isinstance(station_id, str):
             station_id = str(station_id)
         
-        model = str_to_list(model)
-        if model is not None and len(model) > 1:
-            raise NotImplementedError(f"Only a single model is supported for now. Got {model}")
+        models = str_to_list(models)
+        if models is not None and len(models) > 1:
+            raise NotImplementedError(f"Only a single model is supported for now. Got {models}")
 
         # Convert to UTC
         orig_timezone = start_time.tzinfo
@@ -199,7 +203,7 @@ class QueryManager:
             start_time=start_time_round,
             end_time=end_time_round,
             variables=variables,
-            models = model
+            weather_models = models
         )
 
         if not existing_data.empty:
@@ -224,7 +228,7 @@ class QueryManager:
             station_id=station_id,
             gaps=gaps,
             all_variables = [] if existing_data.empty else [i for i in existing_data.columns if i not in {'station_id', 'datetime'}],
-            models = model
+            models = models
         )
 
         if new_data.empty:

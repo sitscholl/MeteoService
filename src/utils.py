@@ -48,9 +48,10 @@ def split_dates(start_date, end_date, freq, n_days=7, split_on_year=False):
     
     return date_pairs
 
-def reindex_by_date(df, freq: str):
-    dates = pd.date_range(df.index.min(), df.index.max(), freq = freq)
-    return df.reindex(dates)
+def reindex_group(g: pd.DataFrame, freq: str) -> pd.DataFrame:
+    dt = g.index.get_level_values('datetime')
+    full = pd.date_range(dt.min(), dt.max(), freq=freq, name='datetime')
+    return g.reindex(full, level='datetime')
 
 def str_to_list(x):
     if isinstance(x, str):
