@@ -28,16 +28,30 @@ class QueryWorkflow:
 
         start_time = query.start_time
         end_time = query.end_time
+        now = datetime.now(tz = start_time.tzinfo)
+
+        if start_time is not None and not provider_handler.can_forecast and start_time > now:
+            raise ValueError("Start time must be in the past for non-forecast providers")
+
+        if start_time is not None and start_time.tzinfo is None:
+            start_time = tz.localize(start_time)
+
+        window_minutes = (
+            provider_handler.forecast_window_minutes
+            if provider_handler.can_forecast
+            else provider_handler.latest_window_minutes
+        )
 
         if end_time is None:
-            end_time = datetime.now(tz)
+            if start_time is not None and provider_handler.can_forecast and start_time > now:
+                end_time = start_time + timedelta(minutes=window_minutes)
+            else:
+                end_time = now
         elif end_time.tzinfo is None:
             end_time = tz.localize(end_time)
 
         if start_time is None:
-            start_time = end_time - timedelta(minutes=provider_handler.latest_window_minutes)
-        elif start_time.tzinfo is None:
-            start_time = tz.localize(start_time)
+            start_time = end_time - timedelta(minutes=window_minutes)
 
         query.start_time = start_time
         query.end_time = end_time

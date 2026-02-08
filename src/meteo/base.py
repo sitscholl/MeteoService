@@ -27,6 +27,7 @@ class BaseMeteoHandler(ABC):
         max_concurrent_requests: int = 5,
         sleep_time: int = 1,
         latest_window_minutes: int = 60,
+        forecast_window_minutes: int | None = None,
         cache_data: bool = False,
         **kwargs
         ):
@@ -41,6 +42,7 @@ class BaseMeteoHandler(ABC):
 
         self.sleep_time = sleep_time
         self.latest_window_minutes = latest_window_minutes
+        self.forecast_window_minutes = forecast_window_minutes or latest_window_minutes
         self.cache_data = cache_data
         
         self._semaphore = asyncio.Semaphore(self.max_concurrent_requests)
