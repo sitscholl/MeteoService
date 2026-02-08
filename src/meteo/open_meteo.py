@@ -26,6 +26,7 @@ _OPENMETEO_HOURLY_RENAME = {
     "wind_gusts_10m": "wind_gust",
     "terrestrial_radiation_instant": "solar_radiation",
     "snow_depth": "snow_height",
+    "cloud_cover": "cloud_cover"
 }
 
 logger = logging.getLogger(__name__)
