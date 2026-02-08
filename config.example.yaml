@@ -16,7 +16,10 @@ providers:
     timezone: "UTC"
     chunk_size_days: 365
     locations: 
-      bozen: {'lat': 46.498, 'lon': 11.354}
+      bozen: {lat: 46.49481361279614, lon: 11.342960489801857}
+      latsch: {lat: 46.61616415576547, lon: 10.857696621802987}
+      meran: {lat: 46.66544041119714, lon: 11.161634376040833}
+      mals: {lat: 46.68769349964649, lon: 10.546092742161655}
 
 # Database configuration
 database:
