@@ -5,8 +5,6 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 import pytz
 
-from .database.models import Station
-
 DEFAULT_TIMEZONE = "UTC"
 
 # Pydantic models for request/response
