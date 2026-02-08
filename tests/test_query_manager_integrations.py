@@ -10,7 +10,7 @@ gaps/placeholder rows behave as expected before deploying to production.
 """
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timedelta
 import numpy as np
 
 import pytz
@@ -58,6 +58,7 @@ async def _run_query(workflow, provider_handler, station_id, start_time, end_tim
 
 _PROVINCE_TEST_STATIONS = ["01110MS"] #, "23200MS", "89190MS"] #, "65350MS", "41000MS", "31410MS"]
 _SBR_TEST_STATIONS = ["103"] #, "113", "96"] #, "137", "140", "12"]
+_OPENMETEO_TEST_STATIONS = ['latsch'] #, 'mals', 'bozen']
 
 @pytest.fixture
 def runtime(tmp_path):
@@ -80,6 +81,15 @@ def workflow(runtime):
     ],
 )
 def provider_station(request):
+    return request.param
+
+@pytest.fixture(
+    scope="session",
+    params=[
+        *[("open-meteo", station_id) for station_id in _OPENMETEO_TEST_STATIONS],
+    ],
+)
+def forecast_provider_station(request):
     return request.param
 
 
@@ -269,7 +279,76 @@ async def test_timezone_equivalence(provider_station, workflow, runtime):
     df_utc = _normalize_response(resp_utc, coerce_to_utc=True)
     df_local = _normalize_response(resp_local, coerce_to_utc=True)
 
+    assert not df_utc.empty
+    assert not df_local.empty
     assert df_utc.shape == df_local.shape
     assert df_utc.equals(df_local)
 
+@pytest.mark.asyncio
+async def test_raise_future_start_time(provider_station, workflow, runtime):
+    provider, station_id = provider_station
+    start_time = dt(2050,1,1)
+
+    q = TimeseriesQuery(
+        provider=provider,
+        station_id=station_id,
+        start_time = start_time,
+    )
+    
+    with pytest.raises(Exception, match = r"Start time must be in the past .*"):
+        response, pending = await workflow.run_timeseries_query(q)
+
 ##Add tests using models argument (e.g. test raise when multiple models are fetched, test that open-meteo provider works for different models)
+##make sure pending is empty when forecast is allowed
+@pytest.mark.asyncio
+async def test_forecast_timezone_equivalence(forecast_provider_station, workflow, runtime):
+    provider, station_id = forecast_provider_station
+
+    rome_tz = pytz.timezone("Europe/Rome")
+    local_start = datetime.now().astimezone(rome_tz)
+    local_end = datetime.now().astimezone(rome_tz) + timedelta(days = 10)
+
+    utc_tz = pytz.timezone('UTC')
+    utc_start = local_start.astimezone(utc_tz)
+    utc_end = local_end.astimezone(utc_tz)
+
+    resp_utc, _ = await _run_query(
+        workflow,
+        runtime.provider_manager.get_provider(provider),
+        station_id,
+        utc_start,
+        utc_end,
+    )
+    resp_local, _ = await _run_query(
+        workflow,
+        runtime.provider_manager.get_provider(provider),
+        station_id,
+        local_start,
+        local_end,
+    )
+
+    df_utc = _normalize_response(resp_utc, coerce_to_utc=True)
+    df_local = _normalize_response(resp_local, coerce_to_utc=True)
+
+    assert not df_utc.empty
+    assert not df_local.empty
+    assert df_utc.shape == df_local.shape
+    assert df_utc.equals(df_local)
+
+@pytest.mark.asyncio
+async def test_forecast_raise_multiple_models(forecast_provider_station, workflow):
+    provider, station_id = forecast_provider_station
+    start = datetime.now()
+    end = datetime.now() + timedelta(days = 10)
+    models = ['meteoswiss_icon_seamless', 'best_match']
+
+    q = TimeseriesQuery(
+        provider=provider,
+        station_id=station_id,
+        start_time = start,
+        end_time = end,
+        models = models
+    )
+    
+    with pytest.raises(NotImplementedError, match = r'.* single model .*'):
+        response, pending = await workflow.run_timeseries_query(q)
