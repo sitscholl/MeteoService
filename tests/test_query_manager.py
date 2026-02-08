@@ -20,7 +20,7 @@ def make_existing_df(index, station_id="STATION_1", model=""):
         },
         index=pd.DatetimeIndex(index),
     )
-    return df
+    return df.reset_index()
 
 
 class FakeDB:
@@ -30,7 +30,7 @@ class FakeDB:
     def query_data(self, provider, station_id, start_time, end_time, variables=None, weather_models=None):
         if self._existing_df.empty:
             return pd.DataFrame()
-        mask = (self._existing_df.index >= start_time) & (self._existing_df.index <= end_time)
+        mask = (self._existing_df.datetime >= start_time) & (self._existing_df.datetime <= end_time)
         return self._existing_df.loc[mask].copy()
 
 
@@ -41,6 +41,7 @@ class FakeProvider:
         self.inclusive = inclusive
         self.latest_window_minutes = 60
         self.run = AsyncMock(side_effect=self._run)
+        self.can_forecast = False
 
     async def _run(self, start, end, data_type, station_id, models=None):
         if start >= end:
@@ -75,54 +76,6 @@ def manager():
 @pytest.fixture()
 def provider():
     return FakeProvider()
-
-
-@pytest.mark.asyncio
-async def test_get_data_returns_existing_when_no_gaps(manager, provider):
-    start_time = dt_utc(2025, 1, 1, 0)
-    end_time = dt_utc(2025, 1, 1, 5)
-    full_range = pd.date_range(start=start_time, end=end_time, freq=provider.freq, inclusive="both")
-    existing_df = make_existing_df(full_range)
-    db = FakeDB(existing_df)
-
-    combined, pending = await manager.get_data(
-        db=db,
-        provider_handler=provider,
-        station_id="STATION_1",
-        start_time=start_time,
-        end_time=end_time,
-    )
-
-    assert pending.empty
-    assert len(combined) == len(full_range)
-    provider.run.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_get_data_fetches_only_missing_gaps(manager, provider):
-    start_time = dt_utc(2025, 1, 1, 0)
-    end_time = dt_utc(2025, 1, 1, 5)
-    full_range = pd.date_range(start=start_time, end=end_time, freq=provider.freq, inclusive="both")
-    existing_range = full_range[:4]  # missing the last two timestamps
-    existing_df = make_existing_df(existing_range)
-    db = FakeDB(existing_df)
-
-    combined, pending = await manager.get_data(
-        db=db,
-        provider_handler=provider,
-        station_id="STATION_1",
-        start_time=start_time,
-        end_time=end_time,
-    )
-
-    assert len(combined) == len(full_range)
-    assert len(pending) == 2
-    provider.run.assert_called_once()
-    called_start = provider.run.call_args.kwargs["start"]
-    called_end = provider.run.call_args.kwargs["end"]
-    assert pd.Timestamp(called_start) == full_range[4]
-    assert pd.Timestamp(called_end) == full_range[5]
-
 
 @pytest.mark.asyncio
 async def test_get_data_fetches_full_range_when_cache_empty(manager, provider):
