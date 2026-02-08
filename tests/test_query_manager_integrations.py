@@ -246,7 +246,6 @@ async def test_invalid_station(provider_station, runtime, workflow):
     assert return_data.empty
     assert pending.empty
 
-## test invalid provider
 @pytest.mark.asyncio
 async def test_invalid_provider(workflow):
     start_time = dt(2026,1,1)
@@ -384,3 +383,63 @@ async def test_forecast_fetching(forecast_provider_station, timezone_name, runti
     assert len(pending) == len(full_range)
     assert np.array_equal(response.datetime.values, full_range.values)
     assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
+
+@pytest.mark.asyncio
+async def test_workflow_sets_query_timezone_from_aware_times(workflow):
+
+    rome_tz = pytz.timezone("Europe/Rome")
+    start_time = rome_tz.localize(datetime(2025, 6, 1, 12, 0, 0))
+    end_time = rome_tz.localize(datetime(2025, 6, 1, 13, 0, 0))
+
+    query = TimeseriesQuery(
+        provider="province",
+        station_id="01110MS",
+        start_time=start_time,
+        end_time=end_time,
+        timezone="UTC",
+    )
+
+    response, _ = await workflow.run_timeseries_query(query)
+
+    assert query.timezone == "Europe/Rome"
+    assert response.metadata.timezone == str(start_time.tzinfo)
+    assert response.metadata.timezone == query.timezone
+
+@pytest.mark.asyncio
+async def test_workflow_sets_query_timezone_from_aware_end_time(workflow):
+
+    rome_tz = pytz.timezone("Europe/Rome")
+    end_time = rome_tz.localize(datetime(2025, 6, 1, 13, 0, 0))
+
+    query = TimeseriesQuery(
+        provider="province",
+        station_id="01110MS",
+        end_time=end_time,
+        timezone="UTC",
+    )
+
+    response, _ = await workflow.run_timeseries_query(query)
+
+    assert query.timezone == "Europe/Rome"
+    assert response.metadata.timezone == str(end_time.tzinfo)
+    assert response.metadata.timezone == query.timezone
+
+@pytest.mark.asyncio
+async def test_workflow_rejects_mismatched_timezones(workflow):
+
+    rome_tz = pytz.timezone("Europe/Rome")
+    utc_tz = pytz.timezone("UTC")
+
+    start_time = rome_tz.localize(datetime(2025, 6, 1, 12, 0, 0))
+    end_time = utc_tz.localize(datetime(2025, 6, 1, 13, 0, 0))
+
+    query = TimeseriesQuery(
+        provider="province",
+        station_id="01110MS",
+        start_time=start_time,
+        end_time=end_time,
+        timezone="UTC",
+    )
+
+    with pytest.raises(ValueError, match="same timezone"):
+        await workflow.run_timeseries_query(query)

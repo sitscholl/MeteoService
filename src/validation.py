@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 import pytz
 
+from .database.models import Station
+
 DEFAULT_TIMEZONE = "UTC"
 
 # Pydantic models for request/response
@@ -56,21 +58,46 @@ class TimeseriesQuery(BaseModel):
                 raise ValueError(f"Unknown timezone: {v}")
         return v
 
+class ResponseMetadata(BaseModel):
+    provider: str
+    timezone: str
+    station_id: str
+    station_name: str | None
+    elevation: float | None
+    latitude: float | None
+    longitude: float | None
+
+    @classmethod
+    def from_query(cls, query: TimeseriesQuery, station_info: Dict[str, str] | None = None):
+
+        if station_info is None:
+            station_info = {}
+
+        return cls (
+            provider = query.provider,
+            timezone = query.timezone,
+            station_id = query.station_id,
+            station_name = station_info.get('name'),
+            elevation = station_info.get('elevation'),
+            latitude = station_info.get('latitude'),
+            longitude = station_info.get('longitude'),
+        )
+
 class TimeseriesResponse(BaseModel):
     data: List[Dict[str, Any]]
     count: int
     time_range: Dict[str, datetime] | None
-    metadata: Dict[str, Any] | None
+    metadata: ResponseMetadata
 
     @classmethod
-    def from_dataframe(cls, df, latest = False):
+    def from_dataframe(cls, df, metadata: ResponseMetadata, latest = False):
 
         if df.empty:
             return cls(
                 data = [],
                 count = 0,
                 time_range = None,
-                metadata = None
+                metadata = metadata
             )
 
         if latest:
@@ -82,7 +109,7 @@ class TimeseriesResponse(BaseModel):
                     data = [],
                     count = 0,
                     time_range = None,
-                    metadata = None
+                    metadata = metadata
                 )
             df = df.sort_values(by = ['station_id', 'model', 'datetime']).iloc[[-1]]
 
@@ -101,7 +128,7 @@ class TimeseriesResponse(BaseModel):
             data=data,
             count=len(data),
             time_range={"start": df_out['datetime'].min(), "end": df_out['datetime'].max()},
-            metadata=None,
+            metadata=metadata,
         )
 
 

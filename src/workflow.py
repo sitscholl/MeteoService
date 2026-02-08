@@ -4,7 +4,7 @@ from fastapi import HTTPException
 import logging
 
 from .runtime import RuntimeContext
-from .validation import TimeseriesQuery, TimeseriesResponse
+from .validation import TimeseriesQuery, TimeseriesResponse, ResponseMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -13,13 +13,25 @@ class QueryWorkflow:
     def __init__(self, runtime: RuntimeContext):
         self.runtime = runtime
 
+    def _get_timezone_for_query(self, query: TimeseriesQuery) -> str:
+        if query.start_time and query.start_time.tzinfo:
+            tz = query.start_time.tzinfo
+            tz= getattr(tz, "zone", str(tz))
+        elif query.end_time and query.end_time.tzinfo:
+            tz = query.end_time.tzinfo
+            tz = getattr(tz, "zone", str(tz))
+        else:
+            tz = query.timezone or self.runtime.default_timezone
+        return tz
+
     async def run_timeseries_query(
         self,
         query: TimeseriesQuery,
         latest: bool = False
     ):
-        tz_name = query.timezone or self.runtime.default_timezone
+        tz_name = self._get_timezone_for_query(query)
         tz = pytz.timezone(tz_name)
+        query.timezone = tz_name
 
         provider_handler = self.runtime.provider_manager.get_provider(query.provider.lower())
 
@@ -28,13 +40,15 @@ class QueryWorkflow:
 
         start_time = query.start_time
         end_time = query.end_time
-        now = datetime.now(tz = start_time.tzinfo)
-
-        if start_time is not None and not provider_handler.can_forecast and start_time > now:
-            raise ValueError("Start time must be in the past for non-forecast providers")
+        now = datetime.now(tz)
 
         if start_time is not None and start_time.tzinfo is None:
             start_time = tz.localize(start_time)
+        if end_time is not None and end_time.tzinfo is None:
+            end_time = tz.localize(end_time)
+
+        if start_time is not None and not provider_handler.can_forecast and start_time > now:
+            raise ValueError("Start time must be in the past for non-forecast providers")
 
         window_minutes = (
             provider_handler.forecast_window_minutes
@@ -47,8 +61,6 @@ class QueryWorkflow:
                 end_time = start_time + timedelta(minutes=window_minutes)
             else:
                 end_time = now
-        elif end_time.tzinfo is None:
-            end_time = tz.localize(end_time)
 
         if start_time is None:
             start_time = end_time - timedelta(minutes=window_minutes)
@@ -70,7 +82,7 @@ class QueryWorkflow:
         )
 
         station = self.runtime.db.query_station(provider=provider_handler.provider_name, external_id=query.station_id)
-        if not station:
+        if not station or len(station) == 0:
             try:
                 logger.debug(f"Fetching station info for station {query.station_id} from provider as station is not yet in database")
                 async with provider_handler as prv:
@@ -83,21 +95,7 @@ class QueryWorkflow:
             station = station[0]
             station_info = {"elevation": station.elevation, 'latitude': station.latitude, 'longitude': station.longitude, "name": station.name}
 
-        query_metadata = {
-            "provider": query.provider,
-            "station": query.station_id,
-            "name": station_info.get('name'),
-            "elevation": station_info.get('elevation'),
-            "latitude": station_info.get('latitude'),
-            "longitude": station_info.get('longitude'),
-            "variables": query.variables,
-            "query_timezone": str(query.start_time.tzinfo),
-            }
-
-        if not df.empty:
-            query_metadata['result_timezone'] = str(getattr(df.datetime.dt, "tz", None))
-
-        response = TimeseriesResponse.from_dataframe(df, latest = latest)
-        response.metadata = query_metadata
+        response_metadata = ResponseMetadata.from_query(query, station_info = station_info)
+        response = TimeseriesResponse.from_dataframe(df, latest = latest, metadata = response_metadata)
 
         return (response, pending)
