@@ -36,7 +36,7 @@ def _normalize_response(response, coerce_to_utc = False):
     if "datetime" in df.columns:
         df["datetime"] = pd.to_datetime(df["datetime"], utc = True)
         
-        df['datetime'] = df['datetime'].dt.tz_convert(response.metadata.get('result_timezone', 'UTC'))
+        df['datetime'] = df['datetime'].dt.tz_convert(response.metadata.timezone)
         
         if coerce_to_utc and df['datetime'].dt.tz != pytz.timezone('UTC'):
             df['datetime'] = df['datetime'].dt.tz_convert("UTC")
@@ -62,8 +62,8 @@ async def _run_query(workflow, provider_handler, station_id, start_time, end_tim
             await db.insert_data(pending, provider_handler)
     return response, pending
 
-_PROVINCE_TEST_STATIONS = ["01110MS"] #, "23200MS", "89190MS"] #, "65350MS", "41000MS", "31410MS"]
-_SBR_TEST_STATIONS = ["103"] #, "113", "96"] #, "137", "140", "12"]
+_PROVINCE_TEST_STATIONS = ["01110MS", "23200MS", "89190MS"] #, "65350MS", "41000MS", "31410MS"]
+_SBR_TEST_STATIONS = ["103", "113", "96"] #, "137", "140", "12"]
 _OPENMETEO_TEST_STATIONS = ['latsch', 'mals', 'bozen']
 
 @pytest.fixture
@@ -228,7 +228,7 @@ async def test_latest_query(provider_station, timezone_name, workflow):
         assert not data[obs_cols].isna().all(axis=None)
 
 @pytest.mark.asyncio
-async def test_invalid_station(provider_station, runtime, workflow):
+async def test_invalid_station(provider_station, workflow):
     provider, _ = provider_station
     start_time = dt(2026,1,1)
     end_time = dt(2026,1,10)
