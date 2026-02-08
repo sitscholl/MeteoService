@@ -6,15 +6,18 @@ providers:
     timezone: 'Europe/Rome'
     chunk_size_days: 7  # Size of chunks when fetching data
     latest_window_minutes: 60  # Window for provider-only latest lookup
+    forecast_window_minutes: 60  # Default window for forecast providers when end_time is omitted
     cache_data: true # wheter to cache data in database for faster retrieval
   province:
     timezone: "Europe/Rome"
     chunk_size_days: 365
     latest_window_minutes: 60
+    forecast_window_minutes: 60
     cache_data: true
   open-meteo:
     timezone: "UTC"
     chunk_size_days: 365
+    forecast_window_minutes: 1440
     locations: 
       bozen: {lat: 46.49481361279614, lon: 11.342960489801857}
       latsch: {lat: 46.61616415576547, lon: 10.857696621802987}
