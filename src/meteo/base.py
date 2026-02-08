@@ -17,6 +17,8 @@ class BaseMeteoHandler(ABC):
     meteorological data from various sources.
     """
 
+    can_forecast = False
+
     def __init__(
         self, 
         timezone: str, 

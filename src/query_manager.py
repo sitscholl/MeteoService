@@ -173,7 +173,7 @@ class QueryManager:
         #(i.e. needs to check data-gaps for each variable separately)
         if variables is not None:
             raise NotImplementedError("Filtering by variables in get_data not implemented yet.")
-        self._validate_query_times(start_time, end_time)
+        self._validate_query_times(start_time, end_time, forecast = provider_handler.can_forecast)
 
         if not isinstance(station_id, str):
             station_id = str(station_id)
@@ -187,7 +187,7 @@ class QueryManager:
         start_time_utc = start_time.astimezone(timezone.utc)
         end_time_utc = end_time.astimezone(timezone.utc)
 
-        start_time_round, end_time_round = self._round_range_to_freq(start_time_utc, end_time_utc, freq = provider_handler.freq)
+        start_time_round, end_time_round = self._round_range_to_freq(start_time_utc, end_time_utc, freq = provider_handler.freq, forecast = provider_handler.can_forecast)
         if start_time_round >= end_time_round:
             # Handle cases where the range is smaller than the frequency
             return pd.DataFrame(), pd.DataFrame()
@@ -233,7 +233,7 @@ class QueryManager:
         return combined, new_data
        
     @staticmethod
-    def _validate_query_times(start_time, end_time):
+    def _validate_query_times(start_time, end_time, forecast: bool = False):
         # Validate timezone awareness
         if start_time.tzinfo is None:
             raise ValueError("start_time must be timezone-aware")
@@ -243,11 +243,13 @@ class QueryManager:
             raise ValueError("start_time and end_time must have the same timezone")
         if start_time > end_time:
             raise ValueError("start_time must be before end_time")
-        if start_time > datetime.now(timezone.utc).astimezone(start_time.tzinfo):
-            raise ValueError("start_time must be in the past")
+
+        if not forecast:
+            if start_time > datetime.now(timezone.utc).astimezone(start_time.tzinfo):
+                raise ValueError("start_time must be in the past")
 
     @staticmethod
-    def _round_range_to_freq(start_time: datetime, end_time: datetime, freq: str):
+    def _round_range_to_freq(start_time: datetime, end_time: datetime, freq: str, forecast: bool = False):
         # Floor the start to ensure we cover the interval
         start_time_round = pd.Timestamp(start_time).floor(freq)
         
@@ -255,11 +257,12 @@ class QueryManager:
         end_time_round = pd.Timestamp(end_time).floor(freq)
         
         # Ensure we don't query the future
-        now_utc = datetime.now(timezone.utc)
-        now_floor = pd.Timestamp(now_utc).floor(freq)
-        if end_time_round > now_floor:
-            logger.warning(f"Requested end time is in the future. Capping at {now_floor} (UTC)")
-            end_time_round = now_floor
+        if not forecast:
+            now_utc = datetime.now(timezone.utc)
+            now_floor = pd.Timestamp(now_utc).floor(freq)
+            if end_time_round > now_floor:
+                logger.warning(f"Requested end time is in the future. Capping at {now_floor} (UTC)")
+                end_time_round = now_floor
 
         return start_time_round, end_time_round
 

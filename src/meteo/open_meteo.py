@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 class OpenMeteo(BaseMeteoHandler):
     
     provider_name = 'open-meteo'
+    can_forecast = True
 
     base_url = "https://api.open-meteo.com/v1"
     timeseries_url = base_url + "/forecast"
@@ -120,7 +121,7 @@ class OpenMeteo(BaseMeteoHandler):
             start: datetime.datetime | None = None,
             end: datetime.datetime | None = None,
             sensor_codes: list[str] | None = None,
-            models: str | list[str] = "meteoswiss_icon_seamless",
+            models: str | list[str] | None = None,
             **kwargs
         ) -> Tuple[pd.DataFrame | None, Dict]:
 
@@ -131,6 +132,8 @@ class OpenMeteo(BaseMeteoHandler):
         self._last_queried_models = None
         if isinstance(models, str):
             models = [models]
+        if models is None:
+            models = ["meteoswiss_icon_seamless"]
         models = [m.lower() for m in models]
 
         possible_models = await self.get_models()
