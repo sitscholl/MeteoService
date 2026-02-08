@@ -207,36 +207,29 @@ class QueryManager:
         )
 
         if not existing_data.empty:
-            logger.info(f"Found existing data ranging from {existing_data.index.min()} to {existing_data.index.max()}")
+            logger.info(f"Found existing data ranging from {existing_data.datetime.min()} to {existing_data.datetime.max()}")
                         
         # Find gaps in the data
-        dt_index = existing_data.index if isinstance(existing_data.index, pd.DatetimeIndex) else pd.DatetimeIndex([])
+        dt_index = pd.DatetimeIndex(existing_data['datetime']) if not existing_data.empty else pd.DatetimeIndex([])
         gaps = self.gapfinder.find_data_gaps(dt_index, start_time_round, end_time_round, freq = provider_handler.freq)
         
         if not gaps:
             logger.info("No data gaps found")
-            if not existing_data.empty:
-                existing_data.index = existing_data.index.tz_convert(orig_timezone)
-            return existing_data, pd.DataFrame()
         else:
-            for (start_gap, end_gap) in gaps:
-                logger.debug(f"Data gap found: {start_gap:%Y-%m-%d %H:%M:%S} - {end_gap:%Y-%m-%d %H:%M:%S}")
+            logger.debug(f"Found {len(gaps)} data gaps: {gaps}")
         
         # Fetch missing data
         new_data = await self._fetch_missing_data(
             provider_handler=provider_handler,
             station_id=station_id,
             gaps=gaps,
-            all_variables = [] if existing_data.empty else [i for i in existing_data.columns if i not in {'station_id', 'datetime'}],
+            all_variables = [] if existing_data.empty else [i for i in existing_data.columns if i not in {'station_id', 'datetime', 'model'}],
             models = models
         )
 
-        if new_data.empty:
-            if not existing_data.empty:
-                existing_data.index = existing_data.index.tz_convert(orig_timezone)
-            return existing_data, pd.DataFrame()
+        combined = self._combine_existing_and_new(existing_data, new_data)
+        combined, new_data = self._prepare_return_data(combined, new_data, target_tz = orig_timezone)
 
-        combined = self._combine_existing_and_new(existing_data, new_data, orig_timezone)
         return combined, new_data
        
     @staticmethod
@@ -271,20 +264,48 @@ class QueryManager:
         return start_time_round, end_time_round
 
     @staticmethod
-    def _combine_existing_and_new(existing_data: pd.DataFrame, new_data: pd.DataFrame, target_tz) -> pd.DataFrame:
+    def _combine_existing_and_new(existing_data: pd.DataFrame, new_data: pd.DataFrame) -> pd.DataFrame:
         
-        datetime_series = new_data.datetime
-        if datetime_series.dt.tz is None:
-            datetime_series = datetime_series.dt.tz_localize(timezone.utc)
-        new_data['datetime'] = datetime_series.dt.tz_convert(target_tz)
-        new_data_indexed = new_data.set_index(['datetime', 'station_id', 'model']).sort_index()
+        if new_data is None:
+            new_data = pd.DataFrame()
 
         if existing_data.empty:
-            return new_data_indexed
+            return new_data
 
-        existing_indexed = existing_data.set_index(['station_id', 'model'], append = True).sort_index()
+        existing_tz = None
+        if not existing_data.empty:
+            existing_tz = existing_data.datetime.dt.tz
+        new_tz = None
+        if not new_data.empty:
+            new_tz = new_data.datetime.dt.tz
 
-        combined = pd.concat([existing_indexed, new_data_indexed])
-        combined = combined[~combined.index.duplicated(keep='last')]
+        if existing_tz is not None and new_tz is not None:
+            if existing_tz != new_tz:
+                raise ValueError(f"Cannot concat data with different timezones. Got existing_data: {existing_tz} vs new_data: {new_tz}")
+
+        combined = pd.concat([existing_data, new_data])
+        combined = combined.drop_duplicates(subset=['station_id', 'datetime', 'model'])
+        combined = combined.sort_values(['datetime', 'station_id', 'model'])
         
         return combined
+
+    @staticmethod
+    def _prepare_return_data(combined_data: pd.DataFrame | None, new_data: pd.DataFrame | None, target_tz) -> Tuple[pd.DataFrame, pd.DataFrame]:
+
+        if combined_data is not None and not combined_data.empty:
+            if combined_data['datetime'].dt.tz is None:
+                logger.warning("Timestamps of combined data are timezone naive. Localizing to UTC")
+                combined_data['datetime'] =  combined_data['datetime'].dt.tz_localize(timezone.utc)
+            combined_data['datetime'] = combined_data['datetime'].dt.tz_convert(target_tz)
+        else:
+            combined_data = pd.DataFrame()
+
+        if new_data is not None and not new_data.empty:
+            if new_data['datetime'].dt.tz is None:
+                logger.warning("Timestamps of new data are timezone naive. Localizing to UTC")
+                new_data['datetime'] =  new_data['datetime'].dt.tz_localize(timezone.utc)
+            new_data['datetime'] = new_data['datetime'].dt.tz_convert(target_tz)
+        else:
+            new_data = pd.DataFrame()
+
+        return combined_data, new_data

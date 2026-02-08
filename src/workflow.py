@@ -77,11 +77,11 @@ class QueryWorkflow:
             "latitude": station_info.get('latitude'),
             "longitude": station_info.get('longitude'),
             "variables": query.variables,
-            "timezone_used": str(query.start_time.tzinfo),
+            "query_timezone": str(query.start_time.tzinfo),
             }
 
         if not df.empty:
-            query_metadata['result_timezone'] = str(getattr(df.index, "tz", None))
+            query_metadata['result_timezone'] = str(getattr(df.datetime.dt, "tz", None))
 
         response = TimeseriesResponse.from_dataframe(df, latest = latest)
         response.metadata = query_metadata

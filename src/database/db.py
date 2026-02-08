@@ -115,7 +115,7 @@ class MeteoDB:
                     df['datetime'] = df['datetime'].tz_localize('UTC')
 
             df = df.pivot(columns = 'variable', values = 'value', index = ['station_id', 'model', 'datetime'])
-            df.reset_index(level = [0,1], inplace = True)
+            df.reset_index(inplace = True)
 
         return df
 

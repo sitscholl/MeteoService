@@ -84,15 +84,11 @@ class TimeseriesResponse(BaseModel):
                     time_range = None,
                     metadata = None
                 )
-            df = df.sort_index().iloc[[-1]]
+            df = df.sort_values(by = ['station_id', 'model', 'datetime']).iloc[[-1]]
 
         df_out = df.copy()
-        df_out = df_out.reset_index()
-        if "datetime" not in df_out.columns:
-            df_out = df_out.rename(columns={"index": "datetime"})
 
-        df_out["datetime"] = pd.to_datetime(df_out["datetime"], errors="coerce")
-        if getattr(df_out["datetime"].dt, "tz", None) is not None:
+        if df_out["datetime"].dt.tz is not None:
             ts = df_out["datetime"].dt.strftime("%Y-%m-%dT%H:%M:%S%z")
             df_out["datetime"] = ts.str.replace(r"([+-]\d{2})(\d{2})$", r"\1:\2", regex=True)
         else:
