@@ -44,6 +44,11 @@ def _normalize_response(response, coerce_to_utc = False):
     df = df.sort_values("datetime").reset_index(drop=True)
     return df
 
+def _round_start_end_to_freq(start, end, freq):
+    start_round = pd.Timestamp(start).floor(freq)
+    end_round = pd.Timestamp(end).floor(freq)
+    return start_round, end_round
+
 async def _run_query(workflow, provider_handler, station_id, start_time, end_time, db = None):
     query = TimeseriesQuery(
         provider=provider_handler.provider_name,
@@ -53,12 +58,13 @@ async def _run_query(workflow, provider_handler, station_id, start_time, end_tim
     )
     response, pending = await workflow.run_timeseries_query(query)
     if db is not None and pending is not None and not pending.empty:
-        await db.insert_data(pending, provider_handler)
+        if provider_handler.cache_data:
+            await db.insert_data(pending, provider_handler)
     return response, pending
 
 _PROVINCE_TEST_STATIONS = ["01110MS"] #, "23200MS", "89190MS"] #, "65350MS", "41000MS", "31410MS"]
 _SBR_TEST_STATIONS = ["103"] #, "113", "96"] #, "137", "140", "12"]
-_OPENMETEO_TEST_STATIONS = ['latsch'] #, 'mals', 'bozen']
+_OPENMETEO_TEST_STATIONS = ['latsch', 'mals', 'bozen']
 
 @pytest.fixture
 def runtime(tmp_path):
@@ -106,7 +112,9 @@ async def test_provider_fetching(provider_station, timezone_name, runtime, workf
     end_time = dt(2025, 7, 1, tzinfo = tz)
 
     provider_handler = runtime.provider_manager.get_provider(provider)
-    full_range = pd.date_range(start=start_time, end=end_time, freq=provider_handler.freq, inclusive="both")
+
+    start_round, end_round = _round_start_end_to_freq(start_time, end_time, freq = provider_handler.freq)
+    full_range = pd.date_range(start=start_round, end=end_round, freq=provider_handler.freq, inclusive="both")
 
     response, pending = await _run_query(workflow, provider_handler, station_id, start_time, end_time, db = runtime.db)
 
@@ -115,49 +123,52 @@ async def test_provider_fetching(provider_station, timezone_name, runtime, workf
 
     assert len(response) == len(full_range)
     assert len(pending) == len(full_range)
-    assert response.datetime.min() == start_time
-    assert response.datetime.max() == end_time
+    assert np.array_equal(response.datetime.values, full_range.values)
     assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
 
     ## Test gap at start of existing data
     start_time2 = dt(2025, 5, 20, tzinfo = tz)
     end_time2 = dt(2025, 6, 10, tzinfo = tz)
-    range2_1 = pd.date_range(start=start_time2, end=end_time2, freq=provider_handler.freq, inclusive="both")
-    range2_2 = pd.date_range(start=start_time2, end=start_time, freq=provider_handler.freq, inclusive="both")
+
+    start2_round, end2_round = _round_start_end_to_freq(start_time2, end_time2, freq = provider_handler.freq)
+    range2 = pd.date_range(start=start2_round, end=end2_round, freq=provider_handler.freq, inclusive="both")
+    range2_before = pd.date_range(start=start2_round, end=start_round, freq=provider_handler.freq, inclusive="both")
 
     response, pending = await _run_query(workflow, provider_handler, station_id, start_time2, end_time2, db = runtime.db)
 
     response = _normalize_response(response)
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
-    assert len(response) == len(range2_1)
-    assert len(pending) == len(range2_2)-1 #overlap gets removed
-    assert response.datetime.min() == start_time2
-    assert response.datetime.max() == end_time2
+    assert len(response) == len(range2)
+    assert len(pending) == len(range2_before)-1 #overlap gets removed
+    assert np.array_equal(response.datetime.values, range2.values)
     assert str(response.datetime.dt.tz) == str(start_time2.tzinfo)
 
     ## Test gap at end of existing data
     start_time3 = dt(2025, 6, 20, tzinfo = tz)
     end_time3 = dt(2025, 7, 10, tzinfo = tz)
-    range3_1 = pd.date_range(start=start_time3, end=end_time3, freq=provider_handler.freq, inclusive="both")
-    range3_2 = pd.date_range(start=end_time, end=end_time3, freq=provider_handler.freq, inclusive="both")
 
+    start3_round, end3_round = _round_start_end_to_freq(start_time3, end_time3, freq = provider_handler.freq)
+    range3 = pd.date_range(start=start3_round, end=end3_round, freq=provider_handler.freq, inclusive="both")
+    range3_after = pd.date_range(start=end_round, end=end3_round, freq=provider_handler.freq, inclusive="both")
+    
     response, pending = await _run_query(workflow, provider_handler, station_id, start_time3, end_time3, db = runtime.db)
 
     response = _normalize_response(response)
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
-    assert len(response) == len(range3_1)
-    assert len(pending) == len(range3_2)-1
-    assert response.datetime.min() == start_time3
-    assert response.datetime.max() == end_time3
+    assert len(response) == len(range3)
+    assert len(pending) == len(range3_after)-1
+    assert np.array_equal(response.datetime.values, range3.values)
     assert str(response.datetime.dt.tz) == str(start_time3.tzinfo)
 
     ## Test with now gap, i.e. all data already cached
 
     start_time4 = dt(2025, 6, 1, tzinfo=tz)
     end_time4 = dt(2025, 6, 10, tzinfo=tz)
-    range4 = pd.date_range(start=start_time4, end=end_time4, freq=provider_handler.freq, inclusive="both")
+
+    start4_round, end4_round = _round_start_end_to_freq(start_time4, end_time4, freq = provider_handler.freq)
+    range4 = pd.date_range(start=start4_round, end=end4_round, freq=provider_handler.freq, inclusive="both")
 
     response, pending = await _run_query(workflow, provider_handler, station_id, start_time4, end_time4, db = runtime.db)
 
@@ -166,8 +177,7 @@ async def test_provider_fetching(provider_station, timezone_name, runtime, workf
 
     assert len(response) == len(range4)
     assert pending.empty
-    assert response.datetime.min() == start_time4
-    assert response.datetime.max() == end_time4
+    assert np.array_equal(response.datetime.values, range4.values)
     assert str(response.datetime.dt.tz) == str(start_time4.tzinfo)
 
 @pytest.mark.asyncio
@@ -179,7 +189,9 @@ async def test_province_dst_changes(runtime, workflow):
     end_time = dt(2025, 12, 31, tzinfo = tz)
 
     provider_handler = runtime.provider_manager.get_provider(provider)
-    full_range = pd.date_range(start=start_time, end=end_time, freq=provider_handler.freq, inclusive="both")
+
+    start_round, end_round = _round_start_end_to_freq(start_time, end_time, freq = provider_handler.freq)
+    full_range = pd.date_range(start=start_round, end=end_round, freq=provider_handler.freq, inclusive="both")
 
     response, pending = await _run_query(workflow, provider_handler, station_id, start_time, end_time)
 
@@ -192,8 +204,7 @@ async def test_province_dst_changes(runtime, workflow):
 
     assert len(response) == len(full_range)
     assert len(response) == len(pending)
-    assert response.datetime.min() == start_time
-    assert response.datetime.max() == end_time
+    assert np.array_equal(response.datetime.values, full_range.values)
     assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
 
 @pytest.mark.asyncio
@@ -298,8 +309,6 @@ async def test_raise_future_start_time(provider_station, workflow, runtime):
     with pytest.raises(Exception, match = r"Start time must be in the past .*"):
         response, pending = await workflow.run_timeseries_query(q)
 
-##Add tests using models argument (e.g. test raise when multiple models are fetched, test that open-meteo provider works for different models)
-##make sure pending is empty when forecast is allowed
 @pytest.mark.asyncio
 async def test_forecast_timezone_equivalence(forecast_provider_station, workflow, runtime):
     provider, station_id = forecast_provider_station
@@ -352,3 +361,26 @@ async def test_forecast_raise_multiple_models(forecast_provider_station, workflo
     
     with pytest.raises(NotImplementedError, match = r'.* single model .*'):
         response, pending = await workflow.run_timeseries_query(q)
+
+@pytest.mark.asyncio
+async def test_forecast_fetching(forecast_provider_station, timezone_name, runtime, workflow):
+    ## Query full timeseries and test result
+    provider, station_id = forecast_provider_station
+    tz = pytz.timezone(timezone_name)
+    start_time = datetime.now(tz = tz)
+    end_time = start_time + timedelta(days = 10)
+
+    provider_handler = runtime.provider_manager.get_provider(provider)
+
+    start_round, end_round = _round_start_end_to_freq(start_time, end_time, freq = provider_handler.freq)
+    full_range = pd.date_range(start=start_round, end=end_round, freq=provider_handler.freq, inclusive="both")
+
+    response, pending = await _run_query(workflow, provider_handler, station_id, start_time, end_time, db = runtime.db)
+
+    response = _normalize_response(response)
+    pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
+
+    assert len(response) == len(full_range)
+    assert len(pending) == len(full_range)
+    assert np.array_equal(response.datetime.values, full_range.values)
+    assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
