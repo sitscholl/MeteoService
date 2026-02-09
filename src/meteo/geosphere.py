@@ -293,7 +293,7 @@ class GeoSphere(BaseMeteoHandler):
             df_renamed['datetime'] = pd.to_datetime(df_renamed['datetime'])
             df_renamed['datetime'] = df_renamed['datetime'].dt.tz_convert('UTC')
             
-            freq = self.get_freq([df_renamed["model"].iloc[0]]) ##use first model as all need to have same freq
+            freq = self.get_freq(df_renamed["model"].iloc[0]) ##use first model as all need to have same freq
             df_renamed['datetime'] = df_renamed['datetime'].dt.floor(freq)
         except Exception as e:
             logger.error(f"Error transforming datetime: {e}")
@@ -334,7 +334,7 @@ if __name__ == '__main__':
         locations = {'bozen': {'lat': 46.498, 'lon': 11.354}}
         geosphere = GeoSphere(timezone = 'Europe/Rome', locations = locations)
         async with geosphere as prv:
-            data, _ = await prv.get_raw_data('bozen', models = ["nowcast-v1-15min-1km", "ensemble-v1-1h-2500m", "nwp-v1-1h-2500m"])
+            data, _ = await prv.get_raw_data('bozen', models = ["ensemble-v1-1h-2500m", "nwp-v1-1h-2500m"])
         
         transformed_data = geosphere.transform(data)
         validated_data = geosphere.validate(transformed_data)
