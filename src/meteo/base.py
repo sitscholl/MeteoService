@@ -53,7 +53,7 @@ class BaseMeteoHandler(ABC):
         self._client = None
 
     @abstractmethod
-    def get_freq(self, model: str | None = None) -> str:
+    def get_freq(self, models: list[str] | None = None) -> str:
         """Return frequency string for datetime frequency of provider measurements.
 
         Override in subclasses when frequency depends on the selected model(s).
