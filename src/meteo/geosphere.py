@@ -1,5 +1,6 @@
 import pandas as pd
 import asyncio
+import httpx
 
 import logging
 from typing import Tuple, Dict, Any
@@ -12,11 +13,38 @@ _GEOSPHERE_MODELS = ["nowcast-v1-15min-1km", "ensemble-v1-1h-2500m", "nwp-v1-1h-
 
 _GEOSPHERE_RENAME = {
     "time": "datetime",
-    "t2m": "tair_2m",
-    "t2m_p10": "tair_2m_p10",
-    "t2m_p50": "tair_2m_p50",
-    "t2m_p90": "tair_2m_p90",
+    "t2m": "temperature_2m",
+    "t2m_p10": "temperature_2mp10",
+    "t2m_p50": "temperature_2m_p50",
+    "t2m_p90": "temperature_2m_p90",
+
     "rr": "precipitation",
+    "rr_p10": "precipitation_p10",
+    "rr_p50": "precipitation_p50",
+    "rr_p90": "precipitation_p90",
+
+    "pt": "precipitation_type",
+    "ff": "wind_speed",
+    "fx": "wind_gust",
+    "rh2m": "relative_humidity",
+
+    "grad_p10": "solar_radiation_p10",
+    "grad_p50": "solar_radiation_p50",
+    "grad_p90": "solar_radiation_p90",
+
+    "sundur_p10": "sun_duration_p10",
+    "sundur_p50": "sun_duration_p50",
+    "sundur_p90": "sun_duration_p90",
+
+    "tcc_p10": "cloud_cover_p10",
+    "tcc_p50": "cloud_cover_p50",
+    "tcc_p90": "cloud_cover_p90",
+
+    # from nwp-v1-1h-2500m
+    'tcc': "cloud_cover",
+    'rr_acc': "precipitation",
+    'sundur_acc': 'sun_duration',
+    'grad': "solar_radiation"
 }
 
 logger = logging.getLogger(__name__)
@@ -37,9 +65,14 @@ class ModelInfo:
         for p_info in json['parameters']:
             params[p_info['name']] = p_info['unit']
 
+        if json['freq'] == "1H":
+            freq = "1h"
+        else:
+            freq = json['freq']
+
         return cls(
             title = json['title'],
-            freq = json['freq'],
+            freq = freq,
             mode = json['mode'],
             parameters = params,
             spatial_resolution = json.get('spatial_resolution_m'),
@@ -60,30 +93,42 @@ class GeoSphere(BaseMeteoHandler):
     def __init__(self, locations: Dict[str, Dict], *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.locations = locations
-        self.variables = {list(_GEOSPHERE_RENAME.keys())}
+        self.variables = ["t2m", "rr"]
         self.models = list(_GEOSPHERE_MODELS)
         self.model_info = None
 
-    async def _get_model_info(self, models: list[str]):
+    async def _get_model_info(self):
 
         if self._client is None:
             raise ValueError("Initialize client before requesting model info")
 
         model_info_dict = {}
-        with self._client as client:
-            for m in models:
+        for m in self.models:
+            try:
                 logger.debug(f"Loading metadata for model {m}")
-                response = await client.get(self.timeseries_url + f"/{m}/metadata", timeout=self.timeout)
+                response = await self._client.get(self.timeseries_url + f"/{m}/metadata", timeout=self.timeout)
                 response.raise_for_status()
 
                 model_info_dict[m] = ModelInfo.from_json(response.json())
+            except Exception as e:
+                logger.exception(f"Failed to load model info for model {m}: {e}")
         
         self.model_info = model_info_dict
+        self.models = list(self.model_info.keys()) #remove models that failed and have no info
+
+    async def __aenter__(self):
+        """Start httpx client that is reused across requests"""
+        logger.info("Opening API session...")
+        self._client = httpx.AsyncClient(timeout = self.timeout)
+        await self._authenticate()
+        if self.model_info is None:
+            await self._get_model_info()
+        return self
 
     def get_freq(self, models: list[str] | None = None) -> str:
         
         if not models:
-            return self.freq
+            return "1h"
 
         if self.model_info is None:
             raise ValueError("Run _get_model_info() first before querying freq for a specific model")
@@ -95,7 +140,7 @@ class GeoSphere(BaseMeteoHandler):
                 "Query models with the same frequency together."
             )
         elif len(freqs) == 0:
-            raise ValueError(f"No frequency for selected models found. Got {models}. Choose one from {list(_GEOSPHERE_MODELS.keys())}")
+            raise ValueError(f"No frequency for selected models found. Got {models}. Choose one from {self.get_models()}")
         return next(iter(freqs))
 
     @property
@@ -104,7 +149,29 @@ class GeoSphere(BaseMeteoHandler):
         return "both"
 
     async def get_sensors(self, station_id: str) -> list[str]:
-        return list(self.variables)
+        if self.model_info is None:
+            raise ValueError("Run _get_model_info() first before querying sensors")
+
+        all_sensors = set()
+        for info in self.model_info.values():
+            all_sensors.update(info.sensors)
+
+        # Normalize quantile-style parameters (e.g., t2m_p10 -> t2m)
+        normalized = set()
+        for sensor in all_sensors:
+            if "_p" in sensor:
+                normalized.add(sensor.split("_p", 1)[0])
+            else:
+                normalized.add(sensor)
+
+        return sorted(normalized)
+
+    def get_model_sensors(self, model: str) -> list[str]:
+        if self.model_info is None:
+            raise ValueError("Run _get_model_info() first before querying model sensors")
+        if model not in self.model_info:
+            raise ValueError(f"Invalid model {model}. Choose one from {self.get_models()}")
+        return list(self.model_info[model].sensors)
 
     async def get_stations(self) -> list[str] | None:
         return list(self.locations.keys())
@@ -203,9 +270,15 @@ class GeoSphere(BaseMeteoHandler):
 
         tasks = []
         for model in models:
+            if sensor_codes is None:
+                available_sensors = self.get_model_sensors(model)
+            else:
+                available_sensors = sensor_codes
+
             expanded_sensors = []
-            for sensor in sensor_codes:
+            for sensor in available_sensors:
                 expanded_sensors.extend(self._expand_model_sensor(model, sensor))
+            
             if not expanded_sensors:
                 logger.warning(f"No valid sensors for model {model}. Skipping.")
                 continue
@@ -255,9 +328,19 @@ class GeoSphere(BaseMeteoHandler):
         return df_prepared
 
     def _expand_model_sensor(self, model: str, sensor: str) -> list[str]:
+
+        if self.model_info is None:
+            raise ValueError("Run _get_model_info() first before trying to expand model sensors")
+
         if model not in self.model_info:
             raise ValueError(f"Cannot expand sensors for model {model}. Choose one of {self.get_models()}")
-        return [i for i in self.model_info[model].sensors if i.startswith(sensor)]
+        
+        model_sensors = self.model_info[model].sensors
+        if sensor in model_sensors:
+            return [sensor]
+
+        expanded = [i for i in model_sensors if i.startswith(f"{sensor}_")]
+        return list(dict.fromkeys(expanded))
 
 if __name__ == '__main__':
 
