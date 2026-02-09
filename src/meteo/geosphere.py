@@ -263,12 +263,7 @@ class GeoSphere(BaseMeteoHandler):
         if invalid_models:
             raise ValueError(f"Invalid models {invalid_models}. Choose from {possible_models}")
 
-        model_freqs = [self.get_freq(m) for m in models]
-        if len(set(model_freqs)) > 1:
-            raise ValueError(
-                f"GeoSphere models have mixed frequencies: {sorted(model_freqs)}. "
-                "Query models with the same frequency together."
-            )
+        model_freq = self.get_freq(models)
 
         if sensor_codes is not None and not isinstance(sensor_codes, list):
             raise ValueError(f"Sensor_codes must be of type list. Got {type(sensor_codes)}")
@@ -296,7 +291,7 @@ class GeoSphere(BaseMeteoHandler):
         for task in asyncio.as_completed(tasks):
             _data = await task
             if _data is not None:
-                raw_response.append(self._rename_and_localize(_data))
+                raw_response.append(self._rename_and_localize(_data, freq = model_freq))
 
         if len(raw_response) > 0:
             raw_response = pd.concat(raw_response, ignore_index = True)
@@ -306,7 +301,7 @@ class GeoSphere(BaseMeteoHandler):
         st_metadata = await self.get_station_info(station_id)
         return raw_response, st_metadata
 
-    def _rename_and_localize(self, raw_data: pd.DataFrame):
+    def _rename_and_localize(self, raw_data: pd.DataFrame, freq: str):
 
         df_renamed = raw_data.copy()
         df_renamed.rename(columns =_GEOSPHERE_RENAME, inplace = True)
