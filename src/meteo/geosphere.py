@@ -124,15 +124,23 @@ class GeoSphere(BaseMeteoHandler):
             await self._get_model_info()
         return self
 
-    def get_freq(self, model: str | None) -> str:
+    def get_freq(self, models: list[str] | None = None) -> str:
         
-        if not model:
+        if not models:
             return "1h"
 
         if self.model_info is None:
             raise ValueError("Run _get_model_info() first before querying freq for a specific model")
 
-        return self.model_info[model].freq
+        freqs = {self.model_info[m].freq for m in models}
+        if len(freqs) > 1:
+            raise ValueError(
+                f"GeoSphere models have mixed frequencies: {sorted(freqs)}. "
+                "Query models with the same frequency together."
+            )
+        elif len(freqs) == 0:
+            raise ValueError(f"No frequency for selected models found. Got {models}. Choose one from {self.get_models()}")
+        return next(iter(freqs))
 
     @property
     def inclusive(self):
