@@ -4,22 +4,51 @@ import asyncio
 import logging
 from typing import Tuple, Dict, Any
 import datetime
+from dataclasses import dataclass
 
 from .base import BaseMeteoHandler
 
-_GEOSPHERE_HOURLY_RENAME = {
-    "time": "datetime",
-    "t2m": "temperature_2m",
-    "rr": "precipitation"
-}
+_GEOSPHERE_MODELS = ["nowcast-v1-15min-1km", "ensemble-v1-1h-2500m", "nwp-v1-1h-2500m"]
 
-_GEOSPHERE_MODEL_FREQ = {
-    "nowcast-v1-15min-1km": "15min",
-    "ensemble-v1-1h-2500m": "h",
-    "nwp-v1-1h-2500m": "h",
+_GEOSPHERE_RENAME = {
+    "time": "datetime",
+    "t2m": "tair_2m",
+    "t2m_p10": "tair_2m_p10",
+    "t2m_p50": "tair_2m_p50",
+    "t2m_p90": "tair_2m_p90",
+    "rr": "precipitation",
 }
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class ModelInfo:
+    title: str
+    freq: str
+    mode: str
+    parameters: Dict[str, str]
+    spatial_resolution: int | None = None
+    crs: str | None = None
+
+    @classmethod
+    def from_json(cls, json):
+
+        params = {}
+        for p_info in json['parameters']:
+            params[p_info['name']] = p_info['unit']
+
+        return cls(
+            title = json['title'],
+            freq = json['freq'],
+            mode = json['mode'],
+            parameters = params,
+            spatial_resolution = json.get('spatial_resolution_m'),
+            crs = json.get('crs')
+        )
+
+    @property
+    def sensors(self):
+        return list(self.parameters.keys())
 
 class GeoSphere(BaseMeteoHandler):
     provider_name = 'geosphere'
@@ -31,21 +60,42 @@ class GeoSphere(BaseMeteoHandler):
     def __init__(self, locations: Dict[str, Dict], *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.locations = locations
-        self.variables = [i for i in _GEOSPHERE_HOURLY_RENAME.keys() if i != 'time']
-        self.models = list(_GEOSPHERE_MODEL_FREQ.keys())
+        self.variables = {list(_GEOSPHERE_RENAME.keys())}
+        self.models = list(_GEOSPHERE_MODELS)
+        self.model_info = None
+
+    async def _get_model_info(self, models: list[str]):
+
+        if self._client is None:
+            raise ValueError("Initialize client before requesting model info")
+
+        model_info_dict = {}
+        with self._client as client:
+            for m in models:
+                logger.debug(f"Loading metadata for model {m}")
+                response = await client.get(self.timeseries_url + f"/{m}/metadata", timeout=self.timeout)
+                response.raise_for_status()
+
+                model_info_dict[m] = ModelInfo.from_json(response.json())
+        
+        self.model_info = model_info_dict
 
     def get_freq(self, models: list[str] | None = None) -> str:
+        
         if not models:
             return self.freq
 
-        freqs = {_GEOSPHERE_MODEL_FREQ.get(m, self.freq) for m in models}
+        if self.model_info is None:
+            raise ValueError("Run _get_model_info() first before querying freq for a specific model")
+
+        freqs = {self.model_info[m].freq for m in models}
         if len(freqs) > 1:
             raise ValueError(
                 f"GeoSphere models have mixed frequencies: {sorted(freqs)}. "
                 "Query models with the same frequency together."
             )
         elif len(freqs) == 0:
-            raise ValueError(f"No frequency for selected models found. Got {models}. Choose one from {list(_GEOSPHERE_MODEL_FREQ.keys())}")
+            raise ValueError(f"No frequency for selected models found. Got {models}. Choose one from {list(_GEOSPHERE_MODELS.keys())}")
         return next(iter(freqs))
 
     @property
@@ -145,20 +195,21 @@ class GeoSphere(BaseMeteoHandler):
         if invalid_models:
             raise ValueError(f"Invalid models {invalid_models}. Choose from {possible_models}")
 
-        all_sensors = await self.get_sensors(station_id)
-        if sensor_codes is None:
-            sensor_codes = all_sensors
-        else:
-            if not isinstance(sensor_codes, list):
-                raise ValueError(f"Sensor_codes must be of type list. Got {type(sensor_codes)}")
-            for sensor in sensor_codes:
-                if sensor not in all_sensors:
-                    raise ValueError(f"Invalid sensor {sensor}. Choose from: {all_sensors}")
+        if sensor_codes is not None and not isinstance(sensor_codes, list):
+            raise ValueError(f"Sensor_codes must be of type list. Got {type(sensor_codes)}")
 
         if start is not None and end is not None and start > end:
             raise ValueError(f"start must be before end. Got {start} - {end}")
 
-        tasks = [self._create_request_task(station_id, m, sensor_codes, start, end) for m in models]
+        tasks = []
+        for model in models:
+            expanded_sensors = []
+            for sensor in sensor_codes:
+                expanded_sensors.extend(self._expand_model_sensor(model, sensor))
+            if not expanded_sensors:
+                logger.warning(f"No valid sensors for model {model}. Skipping.")
+                continue
+            tasks.append(self._create_request_task(station_id, model, expanded_sensors, start, end))
 
         raw_response = []
         for task in asyncio.as_completed(tasks):
@@ -176,17 +227,19 @@ class GeoSphere(BaseMeteoHandler):
 
     def _rename_and_localize(self, raw_data: pd.DataFrame):
 
-        df_reanmed = raw_data.copy()
-        df_reanmed.rename(columns =_GEOSPHERE_HOURLY_RENAME, inplace = True)
+        df_renamed = raw_data.copy()
+        df_renamed.rename(columns =_GEOSPHERE_RENAME, inplace = True)
 
         try:
-            df_reanmed['datetime'] = pd.to_datetime(df_reanmed['datetime']).dt.tz_localize(self.timezone)
-            df_reanmed['datetime'] = df_reanmed['datetime'].dt.tz_convert('UTC')
-            df_reanmed['datetime'] = df_reanmed['datetime'].dt.floor(self.freq)
+            df_renamed['datetime'] = pd.to_datetime(df_renamed['datetime']).dt.tz_localize(self.timezone)
+            df_renamed['datetime'] = df_renamed['datetime'].dt.tz_convert('UTC')
+            
+            freq = self.get_freq([df_renamed["model"].iloc[0]]) ##use first model as all need to have same freq
+            df_renamed['datetime'] = df_renamed['datetime'].dt.floor(freq)
         except Exception as e:
             logger.error(f"Error transforming datetime: {e}")
 
-        return df_reanmed
+        return df_renamed
 
     def transform(self, raw_data: pd.DataFrame | None) -> pd.DataFrame | None:
 
@@ -200,6 +253,11 @@ class GeoSphere(BaseMeteoHandler):
             df_prepared.drop_duplicates(subset = ['datetime', 'station_id', 'model'], inplace = True)
 
         return df_prepared
+
+    def _expand_model_sensor(self, model: str, sensor: str) -> list[str]:
+        if model not in self.model_info:
+            raise ValueError(f"Cannot expand sensors for model {model}. Choose one of {self.get_models()}")
+        return [i for i in self.model_info[model].sensors if i.startswith(sensor)]
 
 if __name__ == '__main__':
 
