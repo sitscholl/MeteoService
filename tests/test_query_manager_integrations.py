@@ -49,12 +49,13 @@ def _round_start_end_to_freq(start, end, freq):
     end_round = pd.Timestamp(end).floor(freq)
     return start_round, end_round
 
-async def _run_query(workflow, provider_handler, station_id, start_time, end_time, db = None):
+async def _run_query(workflow, provider_handler, station_id, start_time, end_time, model = None, db = None):
     query = TimeseriesQuery(
         provider=provider_handler.provider_name,
         start_time=start_time,
         end_time=end_time,
         station_id=station_id,
+        models = [model] if model is not None else None
     )
     response, pending = await workflow.run_timeseries_query(query)
     if db is not None and pending is not None and not pending.empty:
@@ -65,6 +66,7 @@ async def _run_query(workflow, provider_handler, station_id, start_time, end_tim
 _PROVINCE_TEST_STATIONS = ["01110MS", "23200MS", "89190MS"] #, "65350MS", "41000MS", "31410MS"]
 _SBR_TEST_STATIONS = ["103", "113", "96"] #, "137", "140", "12"]
 _OPENMETEO_TEST_STATIONS = ['latsch', 'mals', 'bozen']
+_GEOSPHERE_TEST_STATIONS = ['latsch', 'mals', 'bozen']
 
 @pytest.fixture
 def runtime(tmp_path):
@@ -93,6 +95,7 @@ def provider_station(request):
     scope="session",
     params=[
         *[("open-meteo", station_id) for station_id in _OPENMETEO_TEST_STATIONS],
+        *[("geosphere", station_id) for station_id in _GEOSPHERE_TEST_STATIONS],
     ],
 )
 def forecast_provider_station(request):
@@ -113,8 +116,8 @@ async def test_provider_fetching(provider_station, timezone_name, runtime, workf
 
     provider_handler = runtime.provider_manager.get_provider(provider)
 
-    start_round, end_round = _round_start_end_to_freq(start_time, end_time, freq = provider_handler.freq)
-    full_range = pd.date_range(start=start_round, end=end_round, freq=provider_handler.freq, inclusive="both")
+    start_round, end_round = _round_start_end_to_freq(start_time, end_time, freq = provider_handler.get_freq())
+    full_range = pd.date_range(start=start_round, end=end_round, freq=provider_handler.get_freq(), inclusive="both")
 
     response, pending = await _run_query(workflow, provider_handler, station_id, start_time, end_time, db = runtime.db)
 
@@ -130,9 +133,9 @@ async def test_provider_fetching(provider_station, timezone_name, runtime, workf
     start_time2 = dt(2025, 5, 20, tzinfo = tz)
     end_time2 = dt(2025, 6, 10, tzinfo = tz)
 
-    start2_round, end2_round = _round_start_end_to_freq(start_time2, end_time2, freq = provider_handler.freq)
-    range2 = pd.date_range(start=start2_round, end=end2_round, freq=provider_handler.freq, inclusive="both")
-    range2_before = pd.date_range(start=start2_round, end=start_round, freq=provider_handler.freq, inclusive="both")
+    start2_round, end2_round = _round_start_end_to_freq(start_time2, end_time2, freq = provider_handler.get_freq())
+    range2 = pd.date_range(start=start2_round, end=end2_round, freq=provider_handler.get_freq(), inclusive="both")
+    range2_before = pd.date_range(start=start2_round, end=start_round, freq=provider_handler.get_freq(), inclusive="both")
 
     response, pending = await _run_query(workflow, provider_handler, station_id, start_time2, end_time2, db = runtime.db)
 
@@ -148,9 +151,9 @@ async def test_provider_fetching(provider_station, timezone_name, runtime, workf
     start_time3 = dt(2025, 6, 20, tzinfo = tz)
     end_time3 = dt(2025, 7, 10, tzinfo = tz)
 
-    start3_round, end3_round = _round_start_end_to_freq(start_time3, end_time3, freq = provider_handler.freq)
-    range3 = pd.date_range(start=start3_round, end=end3_round, freq=provider_handler.freq, inclusive="both")
-    range3_after = pd.date_range(start=end_round, end=end3_round, freq=provider_handler.freq, inclusive="both")
+    start3_round, end3_round = _round_start_end_to_freq(start_time3, end_time3, freq = provider_handler.get_freq())
+    range3 = pd.date_range(start=start3_round, end=end3_round, freq=provider_handler.get_freq(), inclusive="both")
+    range3_after = pd.date_range(start=end_round, end=end3_round, freq=provider_handler.get_freq(), inclusive="both")
     
     response, pending = await _run_query(workflow, provider_handler, station_id, start_time3, end_time3, db = runtime.db)
 
@@ -167,8 +170,8 @@ async def test_provider_fetching(provider_station, timezone_name, runtime, workf
     start_time4 = dt(2025, 6, 1, tzinfo=tz)
     end_time4 = dt(2025, 6, 10, tzinfo=tz)
 
-    start4_round, end4_round = _round_start_end_to_freq(start_time4, end_time4, freq = provider_handler.freq)
-    range4 = pd.date_range(start=start4_round, end=end4_round, freq=provider_handler.freq, inclusive="both")
+    start4_round, end4_round = _round_start_end_to_freq(start_time4, end_time4, freq = provider_handler.get_freq())
+    range4 = pd.date_range(start=start4_round, end=end4_round, freq=provider_handler.get_freq(), inclusive="both")
 
     response, pending = await _run_query(workflow, provider_handler, station_id, start_time4, end_time4, db = runtime.db)
 
@@ -190,8 +193,8 @@ async def test_province_dst_changes(runtime, workflow):
 
     provider_handler = runtime.provider_manager.get_provider(provider)
 
-    start_round, end_round = _round_start_end_to_freq(start_time, end_time, freq = provider_handler.freq)
-    full_range = pd.date_range(start=start_round, end=end_round, freq=provider_handler.freq, inclusive="both")
+    start_round, end_round = _round_start_end_to_freq(start_time, end_time, freq = provider_handler.get_freq())
+    full_range = pd.date_range(start=start_round, end=end_round, freq=provider_handler.get_freq(), inclusive="both")
 
     response, pending = await _run_query(workflow, provider_handler, station_id, start_time, end_time)
 
@@ -371,8 +374,8 @@ async def test_forecast_fetching(forecast_provider_station, timezone_name, runti
 
     provider_handler = runtime.provider_manager.get_provider(provider)
 
-    start_round, end_round = _round_start_end_to_freq(start_time, end_time, freq = provider_handler.freq)
-    full_range = pd.date_range(start=start_round, end=end_round, freq=provider_handler.freq, inclusive="both")
+    start_round, end_round = _round_start_end_to_freq(start_time, end_time, freq = provider_handler.get_freq())
+    full_range = pd.date_range(start=start_round, end=end_round, freq=provider_handler.get_freq(), inclusive="both")
 
     response, pending = await _run_query(workflow, provider_handler, station_id, start_time, end_time, db = runtime.db)
 
@@ -443,3 +446,28 @@ async def test_workflow_rejects_mismatched_timezones(workflow):
 
     with pytest.raises(ValueError, match="same timezone"):
         await workflow.run_timeseries_query(query)
+
+@pytest.mark.asyncio
+async def test_geosphere_multiple_models(runtime, workflow):
+    
+    start_time = datetime.now(tz = tz)
+    end_time = start_time + timedelta(hours = 5)
+
+    provider_handler = runtime.provider_manager.get_provider("geosphere")
+
+
+    for model in ["nowcast-v1-15min-1km", "ensemble-v1-1h-2500m", "nwp-v1-1h-2500m"]:
+
+        async with provider_handler as prv:
+            start_round, end_round = _round_start_end_to_freq(start_time, end_time, freq = prv.get_freq([model]))
+            full_range = pd.date_range(start=start_round, end=end_round, freq=prv.get_freq([model]), inclusive="both")
+        
+        response, pending = await _run_query(workflow, provider_handler, 'latsch', start_time, end_time, model = model)
+
+        response = _normalize_response(response)
+        pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
+
+        assert len(response) == len(full_range)
+        assert len(pending) == len(full_range)
+        assert np.array_equal(response.datetime.values, full_range.values)
+        assert str(response.datetime.dt.tz) == str(start_time.tzinfo)

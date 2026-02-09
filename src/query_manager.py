@@ -35,9 +35,9 @@ class QueryManager:
             start_gap_ext, end_gap_ext = start_gap, end_gap
             provider_inclusion = provider_handler.inclusive
             if provider_inclusion == 'left' and is_last:
-                end_gap_ext = end_gap + pd.Timedelta(provider_handler.freq)
+                end_gap_ext = end_gap + pd.Timedelta(provider_handler.get_freq(models))
             if provider_inclusion == 'right' and is_first:
-                start_gap_ext = start_gap - pd.Timedelta(provider_handler.freq)
+                start_gap_ext = start_gap - pd.Timedelta(provider_handler.get_freq(models))
 
             async with self._semaphore:
                 provider_data = await provider_handler.run(
@@ -97,7 +97,7 @@ class QueryManager:
                     gap_index = pd.date_range(
                         start=pd.Timestamp(start_gap),
                         end=pd.Timestamp(end_gap),
-                        freq=prv.freq,
+                        freq=prv.get_freq(models),
                         inclusive="both",
                     )
 
@@ -125,7 +125,7 @@ class QueryManager:
                         provider_data
                         .set_index(['station_id', 'model', 'datetime'])
                         .groupby(level=['station_id', 'model'], sort=False, group_keys=False)
-                        .apply(reindex_group, freq=prv.freq, dt_start = gap_index.min(), dt_end = gap_index.max())
+                        .apply(reindex_group, freq=prv.get_freq(models), dt_start = gap_index.min(), dt_end = gap_index.max())
                         .reset_index()
                     )
 
@@ -187,13 +187,13 @@ class QueryManager:
         start_time_utc = start_time.astimezone(timezone.utc)
         end_time_utc = end_time.astimezone(timezone.utc)
 
-        start_time_round, end_time_round = self._round_range_to_freq(start_time_utc, end_time_utc, freq = provider_handler.freq, forecast = provider_handler.can_forecast)
+        start_time_round, end_time_round = self._round_range_to_freq(start_time_utc, end_time_utc, freq = provider_handler.get_freq(models), forecast = provider_handler.can_forecast)
         if start_time_round >= end_time_round:
             # Handle cases where the range is smaller than the frequency
             return pd.DataFrame(), pd.DataFrame()
 
         logger.info(
-            f"Querying data for station {station_id} (provider={provider_handler.provider_name}) from {start_time_round:%Y-%m-%d %H:%M:%S} (UTC) to {end_time_round:%Y-%m-%d %H:%M:%S} (UTC) with frequency {provider_handler.freq}"
+            f"Querying data for station {station_id} (provider={provider_handler.provider_name}) from {start_time_round:%Y-%m-%d %H:%M:%S} (UTC) to {end_time_round:%Y-%m-%d %H:%M:%S} (UTC) with frequency {provider_handler.get_freq(models)}"
             )
 
         # Get existing data from database
@@ -211,7 +211,7 @@ class QueryManager:
                         
         # Find gaps in the data
         dt_index = pd.DatetimeIndex(existing_data['datetime']) if not existing_data.empty else pd.DatetimeIndex([])
-        gaps = self.gapfinder.find_data_gaps(dt_index, start_time_round, end_time_round, freq = provider_handler.freq)
+        gaps = self.gapfinder.find_data_gaps(dt_index, start_time_round, end_time_round, freq = provider_handler.get_freq(models))
         
         if not gaps:
             logger.info("No data gaps found")

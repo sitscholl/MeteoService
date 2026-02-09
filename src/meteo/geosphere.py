@@ -308,8 +308,8 @@ class GeoSphere(BaseMeteoHandler):
 
         try:
             df_renamed['datetime'] = pd.to_datetime(df_renamed['datetime'])
-            
-            freq = self.get_freq(df_renamed["model"].iloc[0]) ##use first model as all need to have same freq
+            if df_renamed['datetime'].dt.tz is None:
+                df_renamed['datetime'] = df_renamed['datetime'].dt.tz_localize('UTC')
             df_renamed['datetime'] = df_renamed['datetime'].dt.floor(freq)
         except Exception as e:
             logger.error(f"Error transforming datetime: {e}")

@@ -182,7 +182,7 @@ class ProvinceMeteo(BaseMeteoHandler):
         start = start.astimezone(pytz.timezone(self.timezone))
         end = end.astimezone(pytz.timezone(self.timezone))
         
-        dates_split = split_dates(start, end, freq = self.freq, n_days = self.chunk_size_days, split_on_year=split_on_year)
+        dates_split = split_dates(start, end, freq = self.get_freq(), n_days = self.chunk_size_days, split_on_year=split_on_year)
         
         all_sensors = await self.get_sensors(station_id)
         if sensor_codes is None:
@@ -241,7 +241,7 @@ class ProvinceMeteo(BaseMeteoHandler):
                 nonexistent='shift_forward' # handle the spring "gap" too
             ).dt.tz_convert('UTC')
 
-            df_pivot['datetime'] = df_pivot['datetime'].dt.floor(self.freq)
+            df_pivot['datetime'] = df_pivot['datetime'].dt.floor(self.get_freq())
         except Exception as e:
             logger.error(f"Error transforming datetime: {e}")
 

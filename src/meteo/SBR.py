@@ -273,7 +273,7 @@ class SBRMeteo(BaseMeteoHandler):
         if end < start:
             raise ValueError(f'End date must be after start date. Got {start} - {end}')
 
-        dates_split = split_dates(start, end, freq = self.freq, n_days=self.chunk_size_days)
+        dates_split = split_dates(start, end, freq = self.get_freq(), n_days=self.chunk_size_days)
 
         # Start workers
         raw_responses = []
@@ -430,7 +430,7 @@ class SBRMeteo(BaseMeteoHandler):
                 tbl[datetime_name] = (
                     pd.to_datetime(numeric_ts, unit="s", errors="coerce")
                     .dt.tz_localize("UTC") ##timestamp in html is in UTC!
-                    .dt.floor(self.freq)
+                    .dt.floor(self.get_freq())
                 )
                 tbl.rename(columns={datetime_name: "Datum"}, inplace=True)
             except Exception as e:

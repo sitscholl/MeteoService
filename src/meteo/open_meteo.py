@@ -198,7 +198,7 @@ class OpenMeteo(BaseMeteoHandler):
         try:
             df_prepared['datetime'] = pd.to_datetime(df_prepared['datetime']).dt.tz_localize(self.timezone)
             df_prepared['datetime'] = df_prepared['datetime'].dt.tz_convert('UTC')
-            df_prepared['datetime'] = df_prepared['datetime'].dt.floor(self.freq)
+            df_prepared['datetime'] = df_prepared['datetime'].dt.floor(self.get_freq())
         except Exception as e:
             logger.error(f"Error transforming datetime: {e}")
 
