@@ -294,12 +294,13 @@ class GeoSphere(BaseMeteoHandler):
                 raw_response.append(self._rename_and_localize(_data, freq = model_freq))
 
         if len(raw_response) > 0:
-            raw_response = pd.concat(raw_response, ignore_index = True)
+            renamed_response = pd.concat(raw_response, ignore_index = True)
         else:
             logger.warning(f"No data could be fetched for station {station_id}")
+            renamed_response = None
         
         st_metadata = await self.get_station_info(station_id)
-        return raw_response, st_metadata
+        return renamed_response, st_metadata
 
     def _rename_and_localize(self, raw_data: pd.DataFrame, freq: str):
 
