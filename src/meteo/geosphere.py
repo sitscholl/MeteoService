@@ -12,7 +12,6 @@ from .base import BaseMeteoHandler
 _GEOSPHERE_MODELS = ["nowcast-v1-15min-1km", "ensemble-v1-1h-2500m", "nwp-v1-1h-2500m"]
 
 _GEOSPHERE_RENAME = {
-    "time": "datetime",
     "t2m": "temperature_2m",
     "t2m_p10": "temperature_2mp10",
     "t2m_p50": "temperature_2m_p50",
@@ -65,10 +64,10 @@ class ModelInfo:
         for p_info in json['parameters']:
             params[p_info['name']] = p_info['unit']
 
-        if json['freq'] == "1H":
+        if json['frequency'] == "1H":
             freq = "1h"
         else:
-            freq = json['freq']
+            freq = json['frequency']
 
         return cls(
             title = json['title'],
@@ -125,23 +124,15 @@ class GeoSphere(BaseMeteoHandler):
             await self._get_model_info()
         return self
 
-    def get_freq(self, models: list[str] | None = None) -> str:
+    def get_freq(self, model: str | None) -> str:
         
-        if not models:
+        if not model:
             return "1h"
 
         if self.model_info is None:
             raise ValueError("Run _get_model_info() first before querying freq for a specific model")
 
-        freqs = {self.model_info[m].freq for m in models}
-        if len(freqs) > 1:
-            raise ValueError(
-                f"GeoSphere models have mixed frequencies: {sorted(freqs)}. "
-                "Query models with the same frequency together."
-            )
-        elif len(freqs) == 0:
-            raise ValueError(f"No frequency for selected models found. Got {models}. Choose one from {self.get_models()}")
-        return next(iter(freqs))
+        return self.model_info[model].freq
 
     @property
     def inclusive(self):
@@ -149,29 +140,15 @@ class GeoSphere(BaseMeteoHandler):
         return "both"
 
     async def get_sensors(self, station_id: str) -> list[str]:
-        if self.model_info is None:
-            raise ValueError("Run _get_model_info() first before querying sensors")
-
-        all_sensors = set()
-        for info in self.model_info.values():
-            all_sensors.update(info.sensors)
-
-        # Normalize quantile-style parameters (e.g., t2m_p10 -> t2m)
-        normalized = set()
-        for sensor in all_sensors:
-            if "_p" in sensor:
-                normalized.add(sensor.split("_p", 1)[0])
-            else:
-                normalized.add(sensor)
-
-        return sorted(normalized)
+        return list(_GEOSPHERE_RENAME.keys())
 
     def get_model_sensors(self, model: str) -> list[str]:
         if self.model_info is None:
             raise ValueError("Run _get_model_info() first before querying model sensors")
         if model not in self.model_info:
             raise ValueError(f"Invalid model {model}. Choose one from {self.get_models()}")
-        return list(self.model_info[model].sensors)
+        model_sensors_all = list(self.model_info[model].sensors)
+        return [i for i in model_sensors_all if i in _GEOSPHERE_RENAME.keys()]
 
     async def get_stations(self) -> list[str] | None:
         return list(self.locations.keys())
@@ -217,9 +194,11 @@ class GeoSphere(BaseMeteoHandler):
                 await asyncio.sleep(self.sleep_time)
 
             response_data = {}
-            for param_name, param_data in response.json()['properties']['parameters'].items():
-                response_data[param_name] = param_data
-            response_data = pd.DataFrame.from_dict(response_data, index = response.json()['timestamps'])
+            for feature in response.json()['features']:
+                for param_name, param_data in feature['properties']['parameters'].items():
+                    response_data[param_name] = param_data['data']
+            response_data = pd.DataFrame(response_data)
+            response_data['datetime'] = response.json()['timestamps']
 
             if len(response_data) == 0:
                 logger.warning(f"No data found for {data_params}")
@@ -261,6 +240,13 @@ class GeoSphere(BaseMeteoHandler):
         invalid_models = [i for i in models if i not in possible_models]
         if invalid_models:
             raise ValueError(f"Invalid models {invalid_models}. Choose from {possible_models}")
+
+        model_freqs = [self.get_freq(m) for m in models]
+        if len(set(model_freqs)) > 1:
+            raise ValueError(
+                f"GeoSphere models have mixed frequencies: {sorted(model_freqs)}. "
+                "Query models with the same frequency together."
+            )
 
         if sensor_codes is not None and not isinstance(sensor_codes, list):
             raise ValueError(f"Sensor_codes must be of type list. Got {type(sensor_codes)}")
@@ -304,7 +290,7 @@ class GeoSphere(BaseMeteoHandler):
         df_renamed.rename(columns =_GEOSPHERE_RENAME, inplace = True)
 
         try:
-            df_renamed['datetime'] = pd.to_datetime(df_renamed['datetime']).dt.tz_localize(self.timezone)
+            df_renamed['datetime'] = pd.to_datetime(df_renamed['datetime'])
             df_renamed['datetime'] = df_renamed['datetime'].dt.tz_convert('UTC')
             
             freq = self.get_freq([df_renamed["model"].iloc[0]]) ##use first model as all need to have same freq
@@ -348,7 +334,7 @@ if __name__ == '__main__':
         locations = {'bozen': {'lat': 46.498, 'lon': 11.354}}
         geosphere = GeoSphere(timezone = 'Europe/Rome', locations = locations)
         async with geosphere as prv:
-            data, _ = await prv.get_raw_data('bozen', models = ["nwp-v1-1h-2500m"])
+            data, _ = await prv.get_raw_data('bozen', models = ["nowcast-v1-15min-1km", "ensemble-v1-1h-2500m", "nwp-v1-1h-2500m"])
         
         transformed_data = geosphere.transform(data)
         validated_data = geosphere.validate(transformed_data)
