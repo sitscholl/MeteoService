@@ -12,10 +12,10 @@ from .base import BaseMeteoHandler
 _GEOSPHERE_MODELS = ["nowcast-v1-15min-1km", "ensemble-v1-1h-2500m", "nwp-v1-1h-2500m"]
 
 _GEOSPHERE_RENAME = {
-    "t2m": "temperature_2m",
-    "t2m_p10": "temperature_2mp10",
-    "t2m_p50": "temperature_2m_p50",
-    "t2m_p90": "temperature_2m_p90",
+    "t2m": "tair_2m",
+    "t2m_p10": "tair_2m_p10",
+    "t2m_p50": "tair_2m_p50",
+    "t2m_p90": "tair_2m_p90",
 
     "rr": "precipitation",
     "rr_p10": "precipitation_p10",
@@ -140,7 +140,21 @@ class GeoSphere(BaseMeteoHandler):
         return "both"
 
     async def get_sensors(self, station_id: str) -> list[str]:
-        return list(_GEOSPHERE_RENAME.keys())
+        if self.model_info is None:
+            raise ValueError("Run _get_model_info() first before querying sensors")
+
+        all_sensors = set()
+        for info in self.model_info.values():
+            all_sensors.update(info.sensors)
+
+        normalized = set()
+        for sensor in all_sensors:
+            if "_p" in sensor:
+                normalized.add(sensor.split("_p", 1)[0])
+            else:
+                normalized.add(sensor)
+
+        return sorted(normalized)
 
     def get_model_sensors(self, model: str) -> list[str]:
         if self.model_info is None:
@@ -291,7 +305,6 @@ class GeoSphere(BaseMeteoHandler):
 
         try:
             df_renamed['datetime'] = pd.to_datetime(df_renamed['datetime'])
-            df_renamed['datetime'] = df_renamed['datetime'].dt.tz_convert('UTC')
             
             freq = self.get_freq(df_renamed["model"].iloc[0]) ##use first model as all need to have same freq
             df_renamed['datetime'] = df_renamed['datetime'].dt.floor(freq)
