@@ -52,10 +52,12 @@ class BaseMeteoHandler(ABC):
         self._station_sensors_locks: dict[str, asyncio.Lock] = {}
         self._client = None
 
-    @property
     @abstractmethod
-    def freq(self):
-        """Return frequency string for datetime frequency of provider measurements"""
+    def get_freq(self, model: str | None = None) -> str:
+        """Return frequency string for datetime frequency of provider measurements.
+
+        Override in subclasses when frequency depends on the selected model(s).
+        """
         pass
 
     @property

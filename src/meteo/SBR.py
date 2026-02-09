@@ -81,9 +81,8 @@ class SBRMeteo(BaseMeteoHandler):
                 logger.info(f"Loaded station info file with {len(self.station_info.keys())} stations.")
             except Exception as e:
                 logger.warning(f"Failed to load station info file with error: {e}")
-
-    @property
-    def freq(self):
+        
+    def get_freq(self, models: str | None = None):
         return "5min"
 
     @property

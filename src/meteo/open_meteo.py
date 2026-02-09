@@ -46,8 +46,7 @@ class OpenMeteo(BaseMeteoHandler):
         self.models = list(_OPENMETEO_WEATHER_MODELS)
         self._last_queried_models = None
 
-    @property
-    def freq(self):
+    def get_freq(self, model: str | None = None):
         return "h"
 
     @property

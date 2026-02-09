@@ -36,8 +36,7 @@ class ProvinceMeteo(BaseMeteoHandler):
     stations_url = base_url + "/stations"
     timeseries_url = base_url + "/timeseries"
 
-    @property
-    def freq(self):
+    def get_freq(self, model: str | None = None):
         return "10min"
 
     @property
