@@ -101,7 +101,6 @@ class OpenMeteo(BaseMeteoHandler):
                         timeout=self.timeout
                     )
                 response.raise_for_status()
-                await asyncio.sleep(self.sleep_time)
 
             response_data = pd.DataFrame(response.json()['hourly'])
 
