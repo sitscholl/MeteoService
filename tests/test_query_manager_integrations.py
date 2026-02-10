@@ -451,7 +451,7 @@ async def test_workflow_rejects_mismatched_timezones(workflow):
 async def test_geosphere_multiple_models(runtime, workflow):
     
     start_time = datetime.now(tz = tz)
-    end_time = start_time + timedelta(hours = 5)
+    end_time = start_time + timedelta(days = 10)
 
     provider_handler = runtime.provider_manager.get_provider("geosphere")
 
@@ -467,6 +467,12 @@ async def test_geosphere_multiple_models(runtime, workflow):
         response = _normalize_response(response)
         pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
+
+        assert not response.empty
+
+        response_model = response['model'].unique()[0]
+
+        assert response_model == model
         assert len(response) == len(full_range)
         assert len(pending) == len(full_range)
         assert np.array_equal(response.datetime.values, full_range.values)
