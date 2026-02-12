@@ -2,6 +2,7 @@ import pandas as pd
 from scipy.stats import mode
 
 import logging
+import re
 from typing import Callable, Any
 
 logger = logging.getLogger(__name__)
@@ -45,9 +46,19 @@ class ColumnResampler:
         "mode": get_mode,
     }
 
-    def __init__(self, freq: str, resample_colmap: dict[str, str | Callable] | None = None):
-        
-        self.freq = freq
+    _QUANTILE_SUFFIX_PATTERN = re.compile(r"_p\d+$")
+
+    def __init__(
+        self,
+        resample_colmap: dict[str, str | Callable] | None = None,
+        min_sample_size: int = 1,
+        default_freq: str | None = None,
+    ):
+        if min_sample_size < 1:
+            raise ValueError(f"min_sample_size must be >= 1. Got {min_sample_size}")
+
+        self.default_freq = default_freq
+        self.min_sample_size = min_sample_size
         self.resample_colmap = (
             resample_colmap.copy() if resample_colmap is not None else DEFAULT_RESAMPLE_COLMAP.copy()
         )
@@ -70,13 +81,36 @@ class ColumnResampler:
             )
         return self._AGG_STR_TO_FUNC[aggfunc_norm]
 
+    @classmethod
+    def _strip_quantile_suffix(cls, column: str) -> str:
+        return cls._QUANTILE_SUFFIX_PATTERN.sub("", column)
+
+    def _get_mapped_aggfunc(self, column: str, resample_colmap: dict[str, str | Callable]):
+        if column in resample_colmap:
+            return resample_colmap[column]
+        base_column = self._strip_quantile_suffix(column)
+        if base_column in resample_colmap:
+            return resample_colmap[base_column]
+        return None
+
     def apply_resampling(
         self,
         data: pd.DataFrame,
+        freq: str | None = None,
         default_aggfunc: str | Callable | None = None,
         datetime_col: str = "datetime",
         groupby_cols: list[str] | None = None,
+        min_sample_size: int | None = None,
     ) -> pd.DataFrame:
+
+        if freq is None:
+            freq = self.default_freq
+        if freq is None:
+            raise ValueError("No resampling frequency provided. Pass 'freq' or set default_freq in ColumnResampler.")
+
+        min_samples = self.min_sample_size if min_sample_size is None else min_sample_size
+        if min_samples < 1:
+            raise ValueError(f"min_sample_size must be >= 1. Got {min_samples}")
 
         data_copy = data.copy()
         resample_colmap = self.resample_colmap.copy()
@@ -99,28 +133,35 @@ class ColumnResampler:
             logger.info("No value columns available for resampling.")
             return data_copy[required_cols].drop_duplicates().sort_values(by=[datetime_col] + groupby_cols)
 
-        missing_columns = [col for col in value_cols if col not in resample_colmap]
-        if default_aggfunc is None:
-            if missing_columns:
-                logger.info(
-                    f"Columns missing from resample_colmap and ignored in resampling: {missing_columns}"
-                )
-            agg_columns = [c for c in value_cols if c in resample_colmap]
-        else:
-            for col in missing_columns:
-                resample_colmap[col] = default_aggfunc
-            agg_columns = value_cols
+        missing_columns = []
+        agg_columns = []
+        agg_map: dict[str, str | Callable[[pd.Series], Any]] = {}
+        for col in value_cols:
+            mapped = self._get_mapped_aggfunc(col, resample_colmap)
+            if mapped is None:
+                if default_aggfunc is None:
+                    missing_columns.append(col)
+                    continue
+                mapped = default_aggfunc
+            agg_columns.append(col)
+            agg_map[col] = self._resolve_aggfunc(mapped)
+
+        if missing_columns:
+            logger.info(
+                f"Columns missing from resample_colmap and ignored in resampling: {missing_columns}"
+            )
 
         if not agg_columns:
             logger.info("No value columns selected for resampling after aggregation mapping.")
             return data_copy[required_cols].drop_duplicates().sort_values(by=[datetime_col] + groupby_cols)
 
-        agg_map = {col: self._resolve_aggfunc(resample_colmap[col]) for col in agg_columns}
-
         results = []
         for group_vals, group_df in data_copy.groupby(groupby_cols, sort=False, dropna=False):
             group_df = group_df.sort_values(datetime_col).set_index(datetime_col)
-            group_resampled = group_df[agg_columns].resample(self.freq).agg(agg_map)
+            group_resampled = group_df[agg_columns].resample(freq).agg(agg_map)
+            if min_samples > 1:
+                point_count = group_df[agg_columns].resample(freq).count()
+                group_resampled = group_resampled.where(point_count >= min_samples)
             group_resampled = group_resampled.reset_index()
 
             if not isinstance(group_vals, tuple):

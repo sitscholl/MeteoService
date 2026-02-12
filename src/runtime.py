@@ -8,7 +8,7 @@ from .database.db import MeteoDB
 from .provider_manager import ProviderManager
 from .gapfinder import Gapfinder
 from .query_manager import QueryManager
-from .resample import DEFAULT_RESAMPLE_COLMAP
+from .resample import DEFAULT_RESAMPLE_COLMAP, ColumnResampler
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +55,13 @@ class RuntimeContext:
         self.default_timezone = config.get('api', {}).get('default_timezone', 'Europe/Rome')
         
         ## Resampling settings
+        self.resample_min_sample_size = int(config.get('resampling', {}).get('min_sample_size', 1))
         self.resample_colmap = (
             config.get('resampling', {}).get('column_aggfuncs', DEFAULT_RESAMPLE_COLMAP).copy()
+        )
+        self.column_resampler = ColumnResampler(
+            resample_colmap=self.resample_colmap,
+            min_sample_size=self.resample_min_sample_size,
         )
 
         ## Providers

@@ -121,6 +121,11 @@ async def query_timeseries_get(
             None,
             description="Optional aggregation frequency. Use '1D' for daily aggregation.",
         ),
+        min_size: Optional[int] = Query(
+            None,
+            ge=1,
+            description="Optional minimum number of samples per aggregation bucket. If fewer points are available, return null.",
+        ),
         workflow: QueryWorkflow = Depends(get_workflow),
     ):
 
@@ -143,6 +148,8 @@ async def query_timeseries_get(
             agg = "1D"
         else:
             raise HTTPException(status_code=400, detail="Only daily aggregation is supported currently. Use agg=1D.")
+    elif min_size is not None:
+        raise HTTPException(status_code=400, detail="min_size requires aggregation. Use agg=1D.")
 
     # Support comma-separated fallback (besides repeated ?variables=)
     if variables:
@@ -164,7 +171,12 @@ async def query_timeseries_get(
         raise HTTPException(status_code=400, detail=str(e))
 
     try:
-        response, pending = await workflow.run_timeseries_query(q, latest = latest, agg=agg)
+        response, pending = await workflow.run_timeseries_query(
+            q,
+            latest=latest,
+            agg=agg,
+            min_size=min_size,
+        )
         if pending is not None and not pending.empty and not latest:
             if provider_handler.cache_data:
                 background_tasks.add_task(runtime.db.insert_data, pending, provider_handler)

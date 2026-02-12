@@ -42,6 +42,7 @@ api:
   default_timezone: 'Europe/Rome'  # Default timezone for naive datetimes in API requests
 
 resampling:
+  min_sample_size: 1
   column_aggfuncs:
     tair_2m: mean
     tsoil_25cm: mean
