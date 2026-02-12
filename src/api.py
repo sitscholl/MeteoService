@@ -117,6 +117,10 @@ async def query_timeseries_get(
             None,
             description="Timezone for naive datetimes, e.g. 'Europe/Rome'. Ignored if start/end include tzinfo.",
         ),
+        agg: Optional[str] = Query(
+            None,
+            description="Optional aggregation frequency. Use '1D' for daily aggregation.",
+        ),
         workflow: QueryWorkflow = Depends(get_workflow),
     ):
 
@@ -130,6 +134,15 @@ async def query_timeseries_get(
 
     if latest and (start_date is not None or end_date is not None):
         raise HTTPException(status_code=400, detail="start_date and end_date not allowed for query type latest.")
+    if latest and agg is not None:
+        raise HTTPException(status_code=400, detail="Aggregation is not supported for query type latest.")
+
+    if agg is not None:
+        agg_norm = agg.strip().lower()
+        if agg_norm in {"d", "1d"}:
+            agg = "1D"
+        else:
+            raise HTTPException(status_code=400, detail="Only daily aggregation is supported currently. Use agg=1D.")
 
     # Support comma-separated fallback (besides repeated ?variables=)
     if variables:
@@ -151,7 +164,7 @@ async def query_timeseries_get(
         raise HTTPException(status_code=400, detail=str(e))
 
     try:
-        response, pending = await workflow.run_timeseries_query(q, latest = latest)
+        response, pending = await workflow.run_timeseries_query(q, latest = latest, agg=agg)
         if pending is not None and not pending.empty and not latest:
             if provider_handler.cache_data:
                 background_tasks.add_task(runtime.db.insert_data, pending, provider_handler)

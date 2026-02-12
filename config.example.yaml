@@ -40,3 +40,23 @@ database:
 # API configuration
 api:
   default_timezone: 'Europe/Rome'  # Default timezone for naive datetimes in API requests
+
+resampling:
+  column_aggfuncs:
+    tair_2m: mean
+    tsoil_25cm: mean
+    tdry_60cm: mean
+    twet_60cm: mean
+    relative_humidity: mean
+    wind_speed: mean
+    wind_gust: max
+    wind_direction: mode
+    precipitation: sum
+    irrigation: max
+    leaf_wetness: mean
+    air_pressure: mean
+    sun_duration: mean
+    solar_radiation: sum
+    snow_height: mean
+    water_level: mean
+    discharge: mean

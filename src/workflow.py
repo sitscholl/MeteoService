@@ -5,6 +5,7 @@ import logging
 
 from .runtime import RuntimeContext
 from .validation import TimeseriesQuery, TimeseriesResponse, ResponseMetadata
+from .resample import ColumnResampler
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +28,12 @@ class QueryWorkflow:
     async def run_timeseries_query(
         self,
         query: TimeseriesQuery,
-        latest: bool = False
+        latest: bool = False,
+        agg: str | None = None
     ):
+        if latest and agg is not None:
+            raise HTTPException(status_code=400, detail="Aggregation is not supported for latest queries.")
+
         tz_name = self._get_timezone_for_query(query)
         tz = pytz.timezone(tz_name)
         query.timezone = tz_name
@@ -80,6 +85,10 @@ class QueryWorkflow:
             variables=query.variables,
             models=query.models
         )
+
+        if agg is not None and not df.empty:
+            resampler = ColumnResampler(freq=agg, resample_colmap=self.runtime.resample_colmap)
+            df = resampler.apply_resampling(df)
 
         station = self.runtime.db.query_station(provider=provider_handler.provider_name, external_id=query.station_id)
         if not station or len(station) == 0:
