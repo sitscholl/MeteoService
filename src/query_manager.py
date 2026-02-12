@@ -60,13 +60,14 @@ class QueryManager:
         gaps: List[Tuple[datetime, datetime]] | None,
         all_variables: List[str],
         models: list[str] | None = None
-    ) -> pd.DataFrame:
-        """Fetch and align missing data from the specified provider. Also makes sure that missing timestamps are included by filling with NA"""
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """Fetch missing data and return (response_data, cache_data)."""
         
         if not gaps:
-            return pd.DataFrame()
+            return pd.DataFrame(), pd.DataFrame()
         
-        all_data: list[pd.DataFrame] = []
+        response_data_all: list[pd.DataFrame] = []
+        cache_data_all: list[pd.DataFrame] = []
         n = len(gaps)
         async with provider_handler as prv:
             tasks = []
@@ -105,9 +106,8 @@ class QueryManager:
                         logger.warning(f"No data returned for {start_gap} - {end_gap}")
 
                         if all_variables and len(gap_index) > 0:
-                            if models is None:
-                                models = ['']
-                            for model in models:
+                            cache_models = models if models is not None else ['']
+                            for model in cache_models:
                                 placeholder = pd.DataFrame({
                                     'datetime': gap_index,
                                     'station_id': station_id,
@@ -115,13 +115,14 @@ class QueryManager:
                                 })
                                 for column in all_variables:
                                     placeholder[column] = pd.NA
-                                all_data.append(placeholder)
+                                cache_data_all.append(placeholder)
                         continue
 
                     provider_data.drop_duplicates(subset = ['datetime', 'station_id', 'model'], inplace = True) #remove potential overlaps in data gaps
+                    response_data_all.append(provider_data.copy())
                     
                     ## Reindex to add missing timestamps
-                    provider_data = (
+                    provider_data_cache = (
                         provider_data
                         .set_index(['station_id', 'model', 'datetime'])
                         .groupby(level=['station_id', 'model'], sort=False, group_keys=False)
@@ -131,22 +132,28 @@ class QueryManager:
 
                     #Add missing variables
                     for column in all_variables:
-                        if column not in provider_data.columns:
-                            provider_data[column] = pd.NA
+                        if column not in provider_data_cache.columns:
+                            provider_data_cache[column] = pd.NA
 
-                    all_data.append(provider_data)
+                    cache_data_all.append(provider_data_cache)
                 except Exception as e:
                     logger.exception(
                         f"Error processing data for {start_gap} - {end_gap} from {provider_handler.provider_name}: {e}"
                     )
                     continue
         
-        if all_data:
-            result = pd.concat(all_data, ignore_index=True)
-            result.sort_values('datetime', inplace=True)
-            return result
-            
-        return pd.DataFrame()
+        response_result = pd.DataFrame()
+        cache_result = pd.DataFrame()
+
+        if response_data_all:
+            response_result = pd.concat(response_data_all, ignore_index=True)
+            response_result.sort_values('datetime', inplace=True)
+
+        if cache_data_all:
+            cache_result = pd.concat(cache_data_all, ignore_index=True)
+            cache_result.sort_values('datetime', inplace=True)
+
+        return response_result, cache_result
     
     async def get_data(
             self, 
@@ -219,7 +226,7 @@ class QueryManager:
             logger.debug(f"Found {len(gaps)} data gaps: {gaps}")
         
         # Fetch missing data
-        new_data = await self._fetch_missing_data(
+        new_data_response, new_data_cache = await self._fetch_missing_data(
             provider_handler=provider_handler,
             station_id=station_id,
             gaps=gaps,
@@ -227,10 +234,10 @@ class QueryManager:
             models = models
         )
 
-        combined = self._combine_existing_and_new(existing_data, new_data)
-        combined, new_data = self._prepare_return_data(combined, new_data, target_tz = orig_timezone)
+        combined = self._combine_existing_and_new(existing_data, new_data_response)
+        combined, new_data_cache = self._prepare_return_data(combined, new_data_cache, target_tz = orig_timezone)
 
-        return combined, new_data
+        return combined, new_data_cache
        
     @staticmethod
     def _validate_query_times(start_time, end_time, forecast: bool = False):
