@@ -1,17 +1,10 @@
 import pandas as pd
-from scipy.stats import mode
 
 import logging
 import re
 from typing import Callable, Any
 
 logger = logging.getLogger(__name__)
-
-def get_mode(column: pd.Series):
-    values = column.dropna()
-    if values.empty:
-        return pd.NA
-    return mode(values, nan_policy="omit").mode[0]
 
 DEFAULT_RESAMPLE_COLMAP: dict[str, str] = {
     "tair_2m": "mean",
@@ -21,7 +14,7 @@ DEFAULT_RESAMPLE_COLMAP: dict[str, str] = {
     "relative_humidity": "mean",
     "wind_speed": "mean",
     "wind_gust": "max",
-    "wind_direction": "mode",
+    "wind_direction": "mean",
     "precipitation": "sum",
     "irrigation": "max",
     "leaf_wetness": "mean",
@@ -43,7 +36,6 @@ class ColumnResampler:
         "median": "median",
         "first": "first",
         "last": "last",
-        "mode": get_mode,
     }
 
     _QUANTILE_SUFFIX_PATTERN = re.compile(r"_p\d+$")
