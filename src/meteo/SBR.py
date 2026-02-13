@@ -64,6 +64,10 @@ class SBRMeteo(BaseMeteoHandler):
         self.username = username
         self.password = password
 
+        if self.timezone != 'UTC':
+            raise ValueError("SBRMeteo timezone has to be Europe/Rome as query-url expects the dates in this timezone.")
+            #If other timezone is used, data is still returned correctly, but it does not correspond to the range start-date - end-date
+
         station_info_file = Path(self.stations_url)
         if not station_info_file.exists():
             logger.warning(f"Station info file for SBRMeteo not found. Got {self.stations_url}")
