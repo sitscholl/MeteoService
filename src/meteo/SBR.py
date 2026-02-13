@@ -7,7 +7,6 @@ import logging
 import datetime
 import numpy as np
 import re
-import time
 from typing import Any, Dict, List, Tuple
 import pytz
 from pathlib import Path
@@ -87,7 +86,7 @@ class SBRMeteo(BaseMeteoHandler):
 
     @property
     def inclusive(self):
-        return 'right'
+        return 'both'
 
     async def _authenticate(self):
         """
