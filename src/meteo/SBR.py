@@ -64,7 +64,7 @@ class SBRMeteo(BaseMeteoHandler):
         self.username = username
         self.password = password
 
-        if self.timezone != 'UTC':
+        if self.timezone != 'Europe/Rome':
             raise ValueError("SBRMeteo timezone has to be Europe/Rome as query-url expects the dates in this timezone.")
             #If other timezone is used, data is still returned correctly, but it does not correspond to the range start-date - end-date
 
