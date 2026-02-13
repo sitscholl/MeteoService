@@ -51,7 +51,7 @@ resampling:
     relative_humidity: mean
     wind_speed: mean
     wind_gust: max
-    wind_direction: mode
+    wind_direction: mean
     precipitation: sum
     irrigation: max
     leaf_wetness: mean
