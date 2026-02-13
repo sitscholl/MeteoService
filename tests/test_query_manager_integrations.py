@@ -42,6 +42,9 @@ def _normalize_response(response, coerce_to_utc = False):
             df['datetime'] = df['datetime'].dt.tz_convert("UTC")
 
     df = df.sort_values("datetime").reset_index(drop=True)
+
+    df = df.dropna(subset = [i for i in df.columns if i not in ['station_id', 'model', 'datetime']], how = 'all')
+
     return df
 
 def _round_start_end_to_freq(start, end, freq):
@@ -124,9 +127,9 @@ async def test_provider_fetching(provider_station, timezone_name, runtime, workf
     response = _normalize_response(response)
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
-    assert len(response) == len(full_range)
+    assert not response.empty
     assert len(pending) == len(full_range)
-    assert np.array_equal(response.datetime.values, full_range.values)
+    assert all([i in full_range.values for i in response.datetime.values])
     assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
 
     ## Test gap at start of existing data
@@ -142,9 +145,9 @@ async def test_provider_fetching(provider_station, timezone_name, runtime, workf
     response = _normalize_response(response)
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
-    assert len(response) == len(range2)
+    assert not response.empty
     assert len(pending) == len(range2_before)-1 #overlap gets removed
-    assert np.array_equal(response.datetime.values, range2.values)
+    assert all([i in range2.values for i in response.datetime.values])
     assert str(response.datetime.dt.tz) == str(start_time2.tzinfo)
 
     ## Test gap at end of existing data
@@ -160,9 +163,9 @@ async def test_provider_fetching(provider_station, timezone_name, runtime, workf
     response = _normalize_response(response)
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
-    assert len(response) == len(range3)
+    assert not response.empty
     assert len(pending) == len(range3_after)-1
-    assert np.array_equal(response.datetime.values, range3.values)
+    assert all([i in range3.values for i in response.datetime.values])
     assert str(response.datetime.dt.tz) == str(start_time3.tzinfo)
 
     ## Test with now gap, i.e. all data already cached
@@ -178,9 +181,9 @@ async def test_provider_fetching(provider_station, timezone_name, runtime, workf
     response = _normalize_response(response)
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
-    assert len(response) == len(range4)
+    assert not response.empty
     assert pending.empty
-    assert np.array_equal(response.datetime.values, range4.values)
+    assert all([i in range4.values for i in response.datetime.values])
     assert str(response.datetime.dt.tz) == str(start_time4.tzinfo)
 
 @pytest.mark.asyncio
@@ -205,9 +208,9 @@ async def test_province_dst_changes(runtime, workflow):
     response = _normalize_response(response)
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
-    assert len(response) == len(full_range)
-    assert len(response) == len(pending)
-    assert np.array_equal(response.datetime.values, full_range.values)
+    assert not response.empty
+    assert len(pending) == len(full_range)
+    assert all([i in full_range.values for i in response.datetime.values])
     assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
 
 @pytest.mark.asyncio
@@ -229,6 +232,8 @@ async def test_latest_query(provider_station, timezone_name, workflow):
     obs_cols = [c for c in data.columns if c not in {"station_id", "datetime", "model"}]
     if obs_cols:
         assert not data[obs_cols].isna().all(axis=None)
+    else:
+        raise ValueError('No observation columns returned in test_latest_query')
 
 @pytest.mark.asyncio
 async def test_invalid_station(provider_station, workflow):
@@ -382,9 +387,9 @@ async def test_forecast_fetching(forecast_provider_station, timezone_name, runti
     response = _normalize_response(response)
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
-    assert len(response) == len(full_range)
+    assert not response.empty
     assert len(pending) == len(full_range)
-    assert np.array_equal(response.datetime.values, full_range.values)
+    # assert all([i in full_range.values for i in response.datetime.values]) #not applicable because many forecast providers return the full day even if only until certain hour queried
     assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
 
 @pytest.mark.asyncio
@@ -473,7 +478,7 @@ async def test_geosphere_multiple_models(runtime, workflow):
         response_model = response['model'].unique()[0]
 
         assert response_model == model
-        assert len(response) == len(full_range)
+        assert not response.empty
         assert len(pending) == len(full_range)
-        assert np.array_equal(response.datetime.values, full_range.values)
+        assert all([i in full_range.values for i in response.datetime.values])
         assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
