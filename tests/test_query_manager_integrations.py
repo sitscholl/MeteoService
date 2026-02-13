@@ -472,7 +472,6 @@ async def test_geosphere_multiple_models(runtime, workflow):
         response = _normalize_response(response)
         pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
-
         assert not response.empty
 
         response_model = response['model'].unique()[0]
@@ -480,5 +479,5 @@ async def test_geosphere_multiple_models(runtime, workflow):
         assert response_model == model
         assert not response.empty
         assert len(pending) == len(full_range)
-        assert all([i in full_range.values for i in response.datetime.values])
+        # assert all([i in full_range.values for i in response.datetime.values]) #not applicable because many forecast providers return the full day even if only until certain hour queried
         assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
