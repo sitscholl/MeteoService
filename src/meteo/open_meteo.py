@@ -19,6 +19,7 @@ _OPENMETEO_WEATHER_MODELS = ["best_match", "ecmwf_ifs", "ecmwf_ifs025", "ecmwf_a
 _OPENMETEO_HOURLY_RENAME = {
     "time": "datetime",
     "temperature_2m": "tair_2m",
+    "weather_code": "weather_code",
     "relative_humidity_2m": "relative_humidity",
     "precipitation": "precipitation",
     "wind_speed_10m": "wind_speed",
@@ -190,7 +191,7 @@ class OpenMeteo(BaseMeteoHandler):
                 df_prepared = df_prepared.stack(level="model").reset_index()
             
         for col in df_prepared.columns:
-            if col in {"datetime", "station_id"}:
+            if col in {"datetime", "station_id", "weather_code"}:
                 continue
             if pd.api.types.is_integer_dtype(df_prepared[col]):
                 df_prepared[col] = df_prepared[col].astype(float)

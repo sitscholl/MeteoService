@@ -43,7 +43,8 @@ _GEOSPHERE_RENAME = {
     'tcc': "cloud_cover",
     'rr_acc': "precipitation",
     'sundur_acc': 'sun_duration',
-    'grad': "solar_radiation"
+    'grad': "solar_radiation",
+    "sy": "weather_code"
 }
 
 logger = logging.getLogger(__name__)
@@ -351,7 +352,7 @@ if __name__ == '__main__':
         locations = {'bozen': {'lat': 46.498, 'lon': 11.354}}
         geosphere = GeoSphere(timezone = 'Europe/Rome', locations = locations)
         async with geosphere as prv:
-            data, _ = await prv.get_raw_data('bozen', models = ["ensemble-v1-1h-2500m", "nwp-v1-1h-2500m"])
+            data, _ = await prv.get_raw_data('bozen', models = ["nwp-v1-1h-2500m"])
         
         transformed_data = geosphere.transform(data)
         validated_data = geosphere.validate(transformed_data)
