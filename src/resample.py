@@ -141,6 +141,7 @@ class ColumnResampler:
         agg_columns = []
         agg_map: dict[str, str | Callable[[pd.Series], Any] | list[str | Callable[[pd.Series], Any]]] = {}
         output_columns: list[str] = []
+        rename_single: dict[str, str] = {}
         for col in value_cols:
             mapped = self._get_mapped_aggfunc(col, resample_colmap)
             if mapped is None:
@@ -157,7 +158,9 @@ class ColumnResampler:
                     output_columns.append(f"{col}_{self._agg_name(a)}")
             else:
                 agg_map[col] = resolved_list[0]
+                agg_name = self._agg_name(agg_list[0])
                 output_columns.append(col)
+                rename_single[f"{col}_{agg_name}"] = col
 
         if missing_columns:
             logger.info(
@@ -181,6 +184,8 @@ class ColumnResampler:
                     c[0] if c[1] == "" else f"{c[0]}_{c[1]}"
                     for c in group_resampled.columns
                 ]
+                if rename_single:
+                    group_resampled = group_resampled.rename(columns=rename_single)
 
             if not isinstance(group_vals, tuple):
                 group_vals = (group_vals,)

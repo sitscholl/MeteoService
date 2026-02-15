@@ -91,7 +91,7 @@ async def get_stations(provider: str):
         if provider_handler is None:
             raise ValueError(f"Unknown provider {provider.lower()}. Check /providers endpoint for available providers.")
         async with provider_handler as prv:
-            station_list = await provider_handler.get_stations()
+            station_list = await prv.get_stations()
         return station_list
     except Exception as e:
         logger.error(f"Failed to get stations for provider {provider}: {e}")
