@@ -42,7 +42,9 @@ api:
   default_timezone: 'Europe/Rome'  # Default timezone for naive datetimes in API requests
 
 resampling:
-  min_sample_size: 1
+  min_sample_size: 10
+  day_start_hour: 6
+  day_end_hour: 18
   column_aggfuncs:
     tair_2m: [mean, min, max]
     tsoil_25cm: mean
@@ -61,6 +63,8 @@ resampling:
     snow_height: mean
     water_level: mean
     discharge: mean
+    cloud_cover: mean
+    weather_code: weather_mode
 
 query_manager:
   max_concurrent_requests: 3

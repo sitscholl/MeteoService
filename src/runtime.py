@@ -62,6 +62,8 @@ class RuntimeContext:
         self.column_resampler = ColumnResampler(
             resample_colmap=self.resample_colmap,
             min_sample_size=self.resample_min_sample_size,
+            day_start_hour=config.get('resampling', {}).get('day_start_hour'),
+            day_end_hour=config.get('resampling', {}).get('day_end_hour'),
         )
 
         ## Providers

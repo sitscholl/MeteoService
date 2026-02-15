@@ -24,6 +24,7 @@ DEFAULT_RESAMPLE_COLMAP: dict[str, str | list[str]] = {
     "snow_height": "mean",
     "water_level": "mean",
     "discharge": "mean",
+    "weather_code": "weather_mode"
 }
 
 class ColumnResampler:
@@ -45,12 +46,16 @@ class ColumnResampler:
         resample_colmap: dict[str, str | Callable | list[str | Callable] | tuple[str | Callable, ...]] | None = None,
         min_sample_size: int = 1,
         default_freq: str | None = None,
+        day_start_hour: int | None = None,
+        day_end_hour: int | None = None,
     ):
         if min_sample_size < 1:
             raise ValueError(f"min_sample_size must be >= 1. Got {min_sample_size}")
 
         self.default_freq = default_freq
         self.min_sample_size = min_sample_size
+        self.day_start_hour = day_start_hour
+        self.day_end_hour = day_end_hour
         self.resample_colmap = (
             resample_colmap.copy() if resample_colmap is not None else DEFAULT_RESAMPLE_COLMAP.copy()
         )
@@ -66,6 +71,8 @@ class ColumnResampler:
         if callable(aggfunc):
             return aggfunc
         aggfunc_norm = aggfunc.strip().lower()
+        if aggfunc_norm == "weather_mode":
+            return self._weather_code_mode
         if aggfunc_norm not in self._AGG_STR_TO_FUNC:
             raise ValueError(
                 f"Invalid aggregation function '{aggfunc}'. "
@@ -96,6 +103,33 @@ class ColumnResampler:
         if isinstance(aggfunc, str):
             return aggfunc.strip().lower()
         return getattr(aggfunc, "__name__", "custom")
+
+    def _weather_code_mode(self, series: pd.Series):
+        if series is None or series.empty:
+            return pd.NA
+        s = series.dropna()
+        if s.empty:
+            return pd.NA
+
+        start_hour = self.day_start_hour
+        end_hour = self.day_end_hour
+        if start_hour is not None and end_hour is not None:
+            hours = s.index.hour
+            if start_hour == end_hour:
+                pass
+            elif start_hour < end_hour:
+                mask = (hours >= start_hour) & (hours < end_hour)
+                s = s[mask]
+            else:
+                mask = (hours >= start_hour) | (hours < end_hour)
+                s = s[mask]
+            if s.empty:
+                return pd.NA
+
+        mode_vals = s.mode()
+        if mode_vals.empty:
+            return pd.NA
+        return mode_vals.iloc[0]
 
     def apply_resampling(
         self,
