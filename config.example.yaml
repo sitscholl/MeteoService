@@ -61,3 +61,7 @@ resampling:
     snow_height: mean
     water_level: mean
     discharge: mean
+
+query_manager:
+  max_concurrent_requests: 3
+  cache_lag_minutes: 60

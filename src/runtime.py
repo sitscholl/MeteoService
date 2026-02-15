@@ -74,7 +74,13 @@ class RuntimeContext:
         self.gapfinder = Gapfinder()
 
         ## Query Manager
-        self.query_manager = QueryManager()
+        query_cfg = config.get('query_manager', {})
+        max_concurrent_requests = int(query_cfg.get('max_concurrent_requests', 3))
+        cache_lag_minutes = int(query_cfg.get('cache_lag_minutes', 0))
+        self.query_manager = QueryManager(
+            max_concurrent_requests=max_concurrent_requests,
+            cache_lag_minutes=cache_lag_minutes,
+        )
        
 
     def update_runtime(self, config_file: str | Path):

@@ -1,7 +1,7 @@
 import pandas as pd
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Tuple
 import asyncio
 
@@ -15,9 +15,10 @@ logger = logging.getLogger(__name__)
 class QueryManager:
     """Orchestrates data fetching from database and external providers."""
     
-    def __init__(self, max_concurrent_requests: int = 3):
+    def __init__(self, max_concurrent_requests: int = 3, cache_lag_minutes: int = 0):
         self.gapfinder = Gapfinder()
         self._semaphore = asyncio.Semaphore(max_concurrent_requests)
+        self.cache_lag_minutes = cache_lag_minutes
 
     async def _create_fetch_task(
         self,
@@ -240,6 +241,7 @@ class QueryManager:
 
         combined = self._combine_existing_and_new(existing_data, new_data_response)
         combined, new_data_cache = self._prepare_return_data(combined, new_data_cache, target_tz = orig_timezone)
+        new_data_cache = self._filter_cache_recent(new_data_cache)
 
         return combined, new_data_cache
        
@@ -323,3 +325,18 @@ class QueryManager:
             new_data = pd.DataFrame()
 
         return combined_data, new_data
+
+    def _filter_cache_recent(self, new_data_cache: pd.DataFrame | None) -> pd.DataFrame:
+        if new_data_cache is None or new_data_cache.empty:
+            return pd.DataFrame() if new_data_cache is None else new_data_cache
+        if not self.cache_lag_minutes or self.cache_lag_minutes <= 0:
+            return new_data_cache
+        if 'datetime' not in new_data_cache.columns:
+            return new_data_cache
+
+        tz = new_data_cache['datetime'].dt.tz
+        now = datetime.now(timezone.utc)
+        if tz is not None:
+            now = now.astimezone(tz)
+        cutoff = now - timedelta(minutes=self.cache_lag_minutes)
+        return new_data_cache[new_data_cache['datetime'] <= cutoff].reset_index(drop=True)
