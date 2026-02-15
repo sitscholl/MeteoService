@@ -175,7 +175,7 @@ class ColumnResampler:
         agg_columns = []
         agg_map: dict[str, str | Callable[[pd.Series], Any] | list[str | Callable[[pd.Series], Any]]] = {}
         output_columns: list[str] = []
-        rename_single: dict[str, str] = {}
+        rename_map: dict[str, str] = {}
         for col in value_cols:
             mapped = self._get_mapped_aggfunc(col, resample_colmap)
             if mapped is None:
@@ -188,13 +188,16 @@ class ColumnResampler:
             resolved_list = [self._resolve_aggfunc(a) for a in agg_list]
             if force_suffix or len(agg_list) > 1:
                 agg_map[col] = resolved_list
-                for a in agg_list:
-                    output_columns.append(f"{col}_{self._agg_name(a)}")
+                for a, r in zip(agg_list, resolved_list):
+                    desired_suffix = self._agg_name(a)
+                    actual_suffix = self._agg_name(r)
+                    output_columns.append(f"{col}_{desired_suffix}")
+                    rename_map[f"{col}_{actual_suffix}"] = f"{col}_{desired_suffix}"
             else:
                 agg_map[col] = resolved_list[0]
-                agg_name = self._agg_name(agg_list[0])
                 output_columns.append(col)
-                rename_single[f"{col}_{agg_name}"] = col
+                actual_suffix = self._agg_name(resolved_list[0])
+                rename_map[f"{col}_{actual_suffix}"] = col
 
         if missing_columns:
             logger.info(
@@ -222,8 +225,8 @@ class ColumnResampler:
                     c[0] if c[1] == "" else f"{c[0]}_{c[1]}"
                     for c in group_resampled.columns
                 ]
-                if rename_single:
-                    group_resampled = group_resampled.rename(columns=rename_single)
+                if rename_map:
+                    group_resampled = group_resampled.rename(columns=rename_map)
 
             if not isinstance(group_vals, tuple):
                 group_vals = (group_vals,)
@@ -239,3 +242,35 @@ class ColumnResampler:
         out = out[groupby_cols + [datetime_col] + output_columns]
         out.sort_values(by=[datetime_col] + groupby_cols, inplace=True)
         return out
+
+
+if __name__ == "__main__":
+    import numpy as np
+
+    logging.basicConfig(level=logging.INFO, force=True)
+
+    rng = pd.date_range("2025-01-01 00:00:00", periods=48, freq="H", tz="UTC")
+    df = pd.DataFrame(
+        {
+            "station_id": ["s1"] * len(rng),
+            "model": ["m1"] * len(rng),
+            "datetime": rng,
+            "tair_2m": np.linspace(0, 20, len(rng)),
+            "weather_code": [0, 1, 2, 2] * 12,
+            "wind_speed": np.random.uniform(0, 10, len(rng)),
+        }
+    )
+
+    resampler = ColumnResampler(
+        resample_colmap={
+            "tair_2m": ["mean", "min", "max"],
+            "weather_code": "weather_mode",
+            "wind_speed": "mean",
+        },
+        min_sample_size=10,
+        day_start_hour=6,
+        day_end_hour=18,
+    )
+
+    out = resampler.apply_resampling(df, freq="1D")
+    print(out.head())
