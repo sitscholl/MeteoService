@@ -2,11 +2,11 @@ import pandas as pd
 
 import logging
 import re
-from typing import Callable, Any
+from typing import Callable, Any, Iterable
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_RESAMPLE_COLMAP: dict[str, str] = {
+DEFAULT_RESAMPLE_COLMAP: dict[str, str | list[str]] = {
     "tair_2m": "mean",
     "tsoil_25cm": "mean",
     "tdry_60cm": "mean",
@@ -42,7 +42,7 @@ class ColumnResampler:
 
     def __init__(
         self,
-        resample_colmap: dict[str, str | Callable] | None = None,
+        resample_colmap: dict[str, str | Callable | list[str | Callable] | tuple[str | Callable, ...]] | None = None,
         min_sample_size: int = 1,
         default_freq: str | None = None,
     ):
@@ -55,7 +55,7 @@ class ColumnResampler:
             resample_colmap.copy() if resample_colmap is not None else DEFAULT_RESAMPLE_COLMAP.copy()
         )
 
-    def update_aggfunc(self, column: str, aggfunc: str | Callable):
+    def update_aggfunc(self, column: str, aggfunc: str | Callable | list[str | Callable] | tuple[str | Callable, ...]):
         if column in self.resample_colmap:
             logger.info(f"Column '{column}' found in resample_colmap. Updating aggregation function.")
         else:
@@ -77,13 +77,25 @@ class ColumnResampler:
     def _strip_quantile_suffix(cls, column: str) -> str:
         return cls._QUANTILE_SUFFIX_PATTERN.sub("", column)
 
-    def _get_mapped_aggfunc(self, column: str, resample_colmap: dict[str, str | Callable]):
+    def _get_mapped_aggfunc(self, column: str, resample_colmap: dict[str, str | Callable | list[str | Callable] | tuple[str | Callable, ...]]):
         if column in resample_colmap:
             return resample_colmap[column]
         base_column = self._strip_quantile_suffix(column)
         if base_column in resample_colmap:
             return resample_colmap[base_column]
         return None
+
+    @staticmethod
+    def _normalize_agg_list(aggfunc: str | Callable | Iterable[str | Callable]):
+        if isinstance(aggfunc, (list, tuple)):
+            return list(aggfunc), True
+        return [aggfunc], False
+
+    @staticmethod
+    def _agg_name(aggfunc: str | Callable) -> str:
+        if isinstance(aggfunc, str):
+            return aggfunc.strip().lower()
+        return getattr(aggfunc, "__name__", "custom")
 
     def apply_resampling(
         self,
@@ -127,7 +139,8 @@ class ColumnResampler:
 
         missing_columns = []
         agg_columns = []
-        agg_map: dict[str, str | Callable[[pd.Series], Any]] = {}
+        agg_map: dict[str, str | Callable[[pd.Series], Any] | list[str | Callable[[pd.Series], Any]]] = {}
+        output_columns: list[str] = []
         for col in value_cols:
             mapped = self._get_mapped_aggfunc(col, resample_colmap)
             if mapped is None:
@@ -136,7 +149,15 @@ class ColumnResampler:
                     continue
                 mapped = default_aggfunc
             agg_columns.append(col)
-            agg_map[col] = self._resolve_aggfunc(mapped)
+            agg_list, force_suffix = self._normalize_agg_list(mapped)
+            resolved_list = [self._resolve_aggfunc(a) for a in agg_list]
+            if force_suffix or len(agg_list) > 1:
+                agg_map[col] = resolved_list
+                for a in agg_list:
+                    output_columns.append(f"{col}_{self._agg_name(a)}")
+            else:
+                agg_map[col] = resolved_list[0]
+                output_columns.append(col)
 
         if missing_columns:
             logger.info(
@@ -155,6 +176,11 @@ class ColumnResampler:
                 point_count = group_df[agg_columns].resample(freq).count()
                 group_resampled = group_resampled.where(point_count >= min_samples)
             group_resampled = group_resampled.reset_index()
+            if isinstance(group_resampled.columns, pd.MultiIndex):
+                group_resampled.columns = [
+                    c[0] if c[1] == "" else f"{c[0]}_{c[1]}"
+                    for c in group_resampled.columns
+                ]
 
             if not isinstance(group_vals, tuple):
                 group_vals = (group_vals,)
@@ -164,9 +190,9 @@ class ColumnResampler:
             results.append(group_resampled)
 
         if not results:
-            return pd.DataFrame(columns=required_cols + agg_columns)
+            return pd.DataFrame(columns=required_cols + output_columns)
 
         out = pd.concat(results, ignore_index=True)
-        out = out[groupby_cols + [datetime_col] + agg_columns]
+        out = out[groupby_cols + [datetime_col] + output_columns]
         out.sort_values(by=[datetime_col] + groupby_cols, inplace=True)
         return out

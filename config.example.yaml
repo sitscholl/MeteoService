@@ -44,7 +44,7 @@ api:
 resampling:
   min_sample_size: 1
   column_aggfuncs:
-    tair_2m: mean
+    tair_2m: [mean, min, max]
     tsoil_25cm: mean
     tdry_60cm: mean
     twet_60cm: mean
