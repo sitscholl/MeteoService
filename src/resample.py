@@ -211,7 +211,11 @@ class ColumnResampler:
             group_resampled = group_df[agg_columns].resample(freq).agg(agg_map)
             if min_samples > 1:
                 point_count = group_df[agg_columns].resample(freq).count()
-                group_resampled = group_resampled.where(point_count >= min_samples)
+                if isinstance(group_resampled.columns, pd.MultiIndex):
+                    count_aligned = point_count.reindex(columns=group_resampled.columns, level=0)
+                    group_resampled = group_resampled.where(count_aligned >= min_samples)
+                else:
+                    group_resampled = group_resampled.where(point_count >= min_samples)
             group_resampled = group_resampled.reset_index()
             if isinstance(group_resampled.columns, pd.MultiIndex):
                 group_resampled.columns = [
