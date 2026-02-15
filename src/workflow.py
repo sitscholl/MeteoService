@@ -92,7 +92,8 @@ class QueryWorkflow:
             start_time=query.start_time,
             end_time=query.end_time,
             variables=query.variables,
-            models=query.models
+            models=query.models,
+            use_cached=not latest
         )
 
         if agg is not None and not df.empty:

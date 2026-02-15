@@ -163,7 +163,8 @@ class QueryManager:
             start_time: datetime,
             end_time: datetime, 
             variables: Optional[List[str]] = None,
-            models: Optional[List[str]] = None
+            models: Optional[List[str]] = None,
+            use_cached: bool = True
         ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Get data from database and fetch missing data from providers if needed.
@@ -203,15 +204,18 @@ class QueryManager:
             f"Querying data for station {station_id} (provider={provider_handler.provider_name}) from {start_time_round:%Y-%m-%d %H:%M:%S} (UTC) to {end_time_round:%Y-%m-%d %H:%M:%S} (UTC) with frequency {provider_handler.get_freq(models)}"
             )
 
-        # Get existing data from database
-        existing_data = db.query_data(
-            provider=provider_handler.provider_name,
-            station_id=station_id,
-            start_time=start_time_round,
-            end_time=end_time_round,
-            variables=variables,
-            weather_models = models
-        )
+        if use_cached:
+            # Get existing data from database
+            existing_data = db.query_data(
+                provider=provider_handler.provider_name,
+                station_id=station_id,
+                start_time=start_time_round,
+                end_time=end_time_round,
+                variables=variables,
+                weather_models = models
+            )
+        else:
+            existing_data = pd.DataFrame()
 
         if not existing_data.empty:
             logger.info(f"Found existing data ranging from {existing_data.datetime.min()} to {existing_data.datetime.max()}")
