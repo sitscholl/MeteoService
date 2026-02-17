@@ -156,28 +156,30 @@ class BaseMeteoHandler(ABC):
                 "station_id": pa.Column(str, nullable = False),
                 "model": pa.Column(str, nullable = False),
 
-                "tair_2m": pa.Column(float, nullable=True, required = False),                           # Temperature 2m
+                "tair_2m.+": pa.Column(float, nullable=True, required = False, regex = True),                           # Temperature 2m
                 "tsoil_25cm": pa.Column(float, nullable=True, required=False),     # Soil temperature -25cm
                 "tdry_60cm": pa.Column(float, nullable=True, required=False),           # Dry temperature 60cm
                 "twet_60cm": pa.Column(float, nullable=True, required=False),           # Wet temperature
-                "relative_humidity": pa.Column(float, nullable=True, required=False),           # Relative humidity
+                "relative_humidity": pa.Column(float, pa.Check.between(0, 100), nullable=True, required=False),           # Relative humidity
                 "wind_speed": pa.Column(float, nullable=True, required=False),         # Wind speed
                 "wind_gust": pa.Column(float, nullable=True, required=False),      # Max wind gust
                 "wind_direction": pa.Column(float, nullable = True, required = False),
-                "precipitation": pa.Column(float, nullable=True, required = False),                        # Precipitation
+                "precipitation.+": pa.Column(float, nullable=True, required = False, regex = True),                        # Precipitation
                 "irrigation": pa.Column(int, nullable=True, required=False),         # Irrigation
                 "leaf_wetness": pa.Column(float, nullable=True, required=False),           # Leaf wetness
                 "millsperiode_start": pa.Column(float, nullable=True, required=False),          # Beginn Millsperiode
                 "rain_start": pa.Column(pd.Timestamp, nullable=True, required=False),
                 "air_pressure": pa.Column(float, nullable = True, required = False),
-                "sun_duration": pa.Column(float, nullable = True, required = False),
-                "solar_radiation": pa.Column(float, nullable = True, required = False),
+                "sun_duration.+": pa.Column(float, nullable = True, required = False, regex = True),
+                "solar_radiation.+": pa.Column(float, nullable = True, required = False, regex = True),
+                "cloud_cover.+": pa.Column(float, pa.Check.between(0, 100), nullable = True, required = False, regex = True),
                 "snow_height": pa.Column(float, nullable = True, required = False),
                 "water_level": pa.Column(float, nullable = True, required = False),
-                "discharge": pa.Column(float, nullable = True, required = False)
+                "discharge": pa.Column(float, nullable = True, required = False),
 
             },
             index=pa.Index(int),
+            unique = ['datetime', 'station_id', 'model'],
             strict=False  # Allow additional columns that might be added
         )
 
