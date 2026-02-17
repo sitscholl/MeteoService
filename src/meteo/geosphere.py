@@ -205,9 +205,9 @@ class GeoSphere(BaseMeteoHandler):
                 "timezone": self.timezone,
             }
             if start is not None:
-                data_params["start"] = pd.Timestamp(start).strftime("%Y-%m-%d")
+                data_params["start"] = pd.Timestamp(start).strftime("%Y-%m-%d %H:%M:%S")
             if end is not None:
-                data_params["end"] = pd.Timestamp(end).strftime("%Y-%m-%d")
+                data_params["end"] = pd.Timestamp(end).strftime("%Y-%m-%d %H:%M:%S")
             async with self._semaphore:
                 response = await self._client.get(
                         self.timeseries_url + f"/{model}", params = data_params,
