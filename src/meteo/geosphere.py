@@ -11,6 +11,10 @@ from .base import BaseMeteoHandler
 
 _GEOSPHERE_MODELS = ["nowcast-v1-15min-1km", "ensemble-v1-1h-2500m", "nwp-v1-1h-2500m"]
 
+_ACCUMULATED_PARAMS = {
+    "nwp-v1-1h-2500m": ["rr_acc", "sundur_acc", "grad"]
+}
+
 _GEOSPHERE_RENAME = {
     "t2m": "tair_2m",
     "t2m_p10": "tair_2m_p10",
@@ -204,10 +208,19 @@ class GeoSphere(BaseMeteoHandler):
                 "parameters": ','.join(sensors),
                 "timezone": self.timezone,
             }
+            
+            any_accumulated = []
             if start is not None:
                 data_params["start"] = pd.Timestamp(start).strftime("%Y-%m-%d %H:%M:%S")
+                if model in _ACCUMULATED_PARAMS.keys():
+                    any_accumulated = [i for i in sensors if i in _ACCUMULATED_PARAMS.get(model, [])]
+                    if len(any_accumulated) > 0:
+                        start = pd.Timestamp(start) - pd.Timedelta(self.get_freq(model))
+                data_params["start"] = pd.Timestamp(start).strftime("%Y-%m-%d")
+            
             if end is not None:
-                data_params["end"] = pd.Timestamp(end).strftime("%Y-%m-%d %H:%M:%S")
+                data_params["end"] = pd.Timestamp(end).strftime("%Y-%m-%d")
+
             async with self._semaphore:
                 response = await self._client.get(
                         self.timeseries_url + f"/{model}", params = data_params,
@@ -227,9 +240,11 @@ class GeoSphere(BaseMeteoHandler):
                 logger.warning(f"No data found for {data_params}")
                 return None
 
-            # From kg m-2 to mm
-            # if 'rr' in response_data.columns:
-            #     response_data['rr'] = response_data['rr'] * 86400
+            # Fix accumulated parameters
+            if len(any_accumulated) > 0:
+                for acc_col in any_accumulated:
+                    response_data[acc_col] = response_data[acc_col]
+
 
             response_data['station_id'] = station_id
             response_data['model'] = model
@@ -329,6 +344,10 @@ class GeoSphere(BaseMeteoHandler):
             logger.warning("Found duplicates for ['datetime', 'station_id', 'model']. They will be dropped")
             df_prepared.drop_duplicates(subset = ['datetime', 'station_id', 'model'], inplace = True)
 
+        for col in df_prepared.columns:
+            if col.startswith('cloud_cover'):
+                df_prepared[col] = df_prepared[col] * 100
+
         return df_prepared
 
     def _expand_model_sensor(self, model: str, sensor: str) -> list[str]:
@@ -345,6 +364,19 @@ class GeoSphere(BaseMeteoHandler):
 
         expanded = [i for i in model_sensors if i.startswith(f"{sensor}_")]
         return list(dict.fromkeys(expanded))
+
+    def _cumulative_to_instantaneous(data: pd.Series):
+        prev = data.shift(1)
+        delta = data - prev
+
+        # clamp tiny negatives to 0
+        delta = delta.clip(lower=0)
+
+        # keep NaNs where either current or prev is NaN
+        mask_null = data.isna() | prev.isna()
+        delta[mask_null] = pd.NA
+
+        return delta
 
 if __name__ == '__main__':
 
