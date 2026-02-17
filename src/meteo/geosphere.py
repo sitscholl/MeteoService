@@ -195,31 +195,53 @@ class GeoSphere(BaseMeteoHandler):
         return info['lat'], info['lon']
 
     async def _create_request_task(
-        self, station_id: str, model: str, sensors: list[str], start=None, end=None
+        self, station_id: str, model: str, sensors: list[str], end=None
         ):
 
         if self._client is None:
             raise ValueError("Initialize client before requesting data")
+
+        try:
+            async with self._semaphore:
+                response = await self._client.get(self.timeseries_url + f"/{model}/metadata", timeout=self.timeout)
+                response.raise_for_status()
+                reference_start = pd.Timestamp(response.json()["last_forecast_reftime"])
+        except Exception as e:
+            logger.exception(f"Fetching last forecast reference time failed with error {e}")
+            #pick conservative default. Forecasts start usually a few hours before now
+            reference_start = datetime.datetime.now() - datetime.timedelta(days = 3)
+
+        reference_start = pd.Timestamp(reference_start)
+        if reference_start.tz is None:
+            reference_start = reference_start.tz_localize("UTC")
+        else:
+            reference_start = reference_start.tz_convert("UTC")
+
+        end_ts = None
+        if end is not None:
+            end_ts = pd.Timestamp(end)
+            if end_ts.tz is None:
+                end_ts = end_ts.tz_localize("UTC")
+            else:
+                end_ts = end_ts.tz_convert("UTC")
+            if end_ts < reference_start:
+                logger.warning(
+                    "End is before the forecast reference start. "
+                    f"end={end_ts}, reference_start={reference_start}"
+                )
+                return None
         
         try:
             lat, lon = await self.get_station_coords(station_id)
             data_params: Dict[str, Any] = {
                 "lat_lon": f"{lat},{lon}",
+                "start": reference_start.strftime("%Y-%m-%d %H:%M:%S"),
                 "parameters": ','.join(sensors),
                 "timezone": self.timezone,
             }
-            
-            any_accumulated = []
-            if start is not None:
-                data_params["start"] = pd.Timestamp(start).strftime("%Y-%m-%d %H:%M:%S")
-                if model in _ACCUMULATED_PARAMS.keys():
-                    any_accumulated = [i for i in sensors if i in _ACCUMULATED_PARAMS.get(model, [])]
-                    if len(any_accumulated) > 0:
-                        start = pd.Timestamp(start) - pd.Timedelta(self.get_freq(model))
-                data_params["start"] = pd.Timestamp(start).strftime("%Y-%m-%d")
-            
-            if end is not None:
-                data_params["end"] = pd.Timestamp(end).strftime("%Y-%m-%d")
+                        
+            if end_ts is not None:
+                data_params["end"] = end_ts.strftime("%Y-%m-%d %H:%M:%S")
 
             async with self._semaphore:
                 response = await self._client.get(
@@ -241,10 +263,10 @@ class GeoSphere(BaseMeteoHandler):
                 return None
 
             # Fix accumulated parameters
-            if len(any_accumulated) > 0:
-                for acc_col in any_accumulated:
-                    response_data[acc_col] = response_data[acc_col]
-
+            accumulated = [i for i in sensors if i in _ACCUMULATED_PARAMS.get(model, [])]
+            if len(accumulated) > 0:
+                for acc_col in accumulated:
+                    response_data[acc_col] = self._cumulative_to_instantaneous(response_data[acc_col])
 
             response_data['station_id'] = station_id
             response_data['model'] = model
@@ -301,7 +323,7 @@ class GeoSphere(BaseMeteoHandler):
             if not expanded_sensors:
                 logger.warning(f"No valid sensors for model {model}. Skipping.")
                 continue
-            tasks.append(self._create_request_task(station_id, model, expanded_sensors, start, end))
+            tasks.append(self._create_request_task(station_id, model, expanded_sensors, end))
 
         raw_response = []
         for task in asyncio.as_completed(tasks):
@@ -314,6 +336,23 @@ class GeoSphere(BaseMeteoHandler):
         else:
             logger.warning(f"No data could be fetched for station {station_id}")
             renamed_response = None
+
+        # clip start/end because query starts from forecast-reference-period
+        if renamed_response is not None:
+            if start is not None:
+                start_ts = pd.Timestamp(start)
+                if start_ts.tz is None:
+                    start_ts = start_ts.tz_localize("UTC")
+                else:
+                    start_ts = start_ts.tz_convert("UTC")
+                renamed_response = renamed_response.loc[renamed_response['datetime'] >= start_ts]
+            if end is not None:
+                end_ts = pd.Timestamp(end)
+                if end_ts.tz is None:
+                    end_ts = end_ts.tz_localize("UTC")
+                else:
+                    end_ts = end_ts.tz_convert("UTC")
+                renamed_response = renamed_response.loc[renamed_response['datetime'] <= end_ts]
         
         st_metadata = await self.get_station_info(station_id)
         return renamed_response, st_metadata
@@ -365,7 +404,7 @@ class GeoSphere(BaseMeteoHandler):
         expanded = [i for i in model_sensors if i.startswith(f"{sensor}_")]
         return list(dict.fromkeys(expanded))
 
-    def _cumulative_to_instantaneous(data: pd.Series):
+    def _cumulative_to_instantaneous(self, data: pd.Series):
         prev = data.shift(1)
         delta = data - prev
 
