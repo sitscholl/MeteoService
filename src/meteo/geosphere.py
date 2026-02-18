@@ -361,6 +361,16 @@ class GeoSphere(BaseMeteoHandler):
         except Exception as e:
             logger.error(f"Error transforming datetime: {e}")
 
+        # Convert solar radiation from Ws m-2 to W m-2 using the interval length
+        try:
+            seconds = pd.Timedelta(freq).total_seconds()
+            if seconds > 0:
+                for col in df_renamed.columns:
+                    if col.startswith("solar_radiation"):
+                        df_renamed[col] = df_renamed[col] / seconds
+        except Exception as e:
+            logger.error(f"Error converting solar radiation units: {e}")
+
         return df_renamed
 
     def transform(self, raw_data: pd.DataFrame | None) -> pd.DataFrame | None:
