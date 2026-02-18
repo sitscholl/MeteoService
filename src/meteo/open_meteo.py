@@ -25,7 +25,7 @@ _OPENMETEO_HOURLY_RENAME = {
     "wind_speed_10m": "wind_speed",
     "wind_direction_10m": "wind_direction",
     "wind_gusts_10m": "wind_gust",
-    "terrestrial_radiation_instant": "solar_radiation",
+    "shortwave_radiation": "solar_radiation",
     "snow_depth": "snow_height",
     "cloud_cover": "cloud_cover"
 }
