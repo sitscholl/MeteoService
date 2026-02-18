@@ -119,6 +119,12 @@ class QueryManager:
                                 cache_data_all.append(placeholder)
                         continue
 
+                    provider_data = self._clip_to_range(provider_data, start_gap, end_gap)
+
+                    if provider_data.empty:
+                        logger.warning(f"No data left after clipping for {start_gap} - {end_gap}")
+                        continue
+
                     provider_data.drop_duplicates(subset = ['datetime', 'station_id', 'model'], inplace = True) #remove potential overlaps in data gaps
                     response_data_all.append(provider_data.copy())
                     
@@ -244,6 +250,29 @@ class QueryManager:
         new_data_cache = self._filter_cache_recent(new_data_cache)
 
         return combined, new_data_cache
+
+    @staticmethod
+    def _clip_to_range(df: pd.DataFrame, start: datetime, end: datetime) -> pd.DataFrame:
+        if df is None or df.empty:
+            return pd.DataFrame()
+        if 'datetime' not in df.columns:
+            return df
+
+        start_ts = pd.Timestamp(start)
+        end_ts = pd.Timestamp(end)
+
+        if start_ts.tz is None:
+            start_ts = start_ts.tz_localize("UTC")
+        else:
+            start_ts = start_ts.tz_convert("UTC")
+
+        if end_ts.tz is None:
+            end_ts = end_ts.tz_localize("UTC")
+        else:
+            end_ts = end_ts.tz_convert("UTC")
+
+        clipped = df.loc[(df['datetime'] >= start_ts) & (df['datetime'] <= end_ts)]
+        return clipped.reset_index(drop=True)
        
     @staticmethod
     def _validate_query_times(start_time, end_time, forecast: bool = False):

@@ -337,23 +337,6 @@ class GeoSphere(BaseMeteoHandler):
             logger.warning(f"No data could be fetched for station {station_id}")
             renamed_response = None
 
-        # clip start/end because query starts from forecast-reference-period
-        if renamed_response is not None:
-            if start is not None:
-                start_ts = pd.Timestamp(start)
-                if start_ts.tz is None:
-                    start_ts = start_ts.tz_localize("UTC")
-                else:
-                    start_ts = start_ts.tz_convert("UTC")
-                renamed_response = renamed_response.loc[renamed_response['datetime'] >= start_ts]
-            if end is not None:
-                end_ts = pd.Timestamp(end)
-                if end_ts.tz is None:
-                    end_ts = end_ts.tz_localize("UTC")
-                else:
-                    end_ts = end_ts.tz_convert("UTC")
-                renamed_response = renamed_response.loc[renamed_response['datetime'] <= end_ts]
-        
         st_metadata = await self.get_station_info(station_id)
         return renamed_response, st_metadata
 
