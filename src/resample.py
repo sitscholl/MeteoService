@@ -44,16 +44,27 @@ class ColumnResampler:
     def __init__(
         self,
         resample_colmap: dict[str, str | Callable | list[str | Callable] | tuple[str | Callable, ...]] | None = None,
-        min_sample_size: int = 1,
+        min_sample_size: int | dict[str, int] = 1,
         default_freq: str | None = None,
         day_start_hour: int | None = None,
         day_end_hour: int | None = None,
     ):
-        if min_sample_size < 1:
-            raise ValueError(f"min_sample_size must be >= 1. Got {min_sample_size}")
+        if isinstance(min_sample_size, dict):
+            for key, value in min_sample_size.items():
+                if not isinstance(value, int):
+                    raise ValueError(f"min_sample_size value for '{key}' must be int. Got {type(value)}")
+                if value < 1:
+                    raise ValueError(f"min_sample_size must be >= 1. Got {value} for '{key}'")
+            normalized_min_sample_size = min_sample_size.copy()
+        else:
+            if not isinstance(min_sample_size, int):
+                raise ValueError(f"min_sample_size must be int or dict[str, int]. Got {type(min_sample_size)}")
+            if min_sample_size < 1:
+                raise ValueError(f"min_sample_size must be >= 1. Got {min_sample_size}")
+            normalized_min_sample_size = {"default": min_sample_size}
 
         self.default_freq = default_freq
-        self.min_sample_size = min_sample_size
+        self.min_sample_size = normalized_min_sample_size
         self.day_start_hour = day_start_hour
         self.day_end_hour = day_end_hour
         self.resample_colmap = (
@@ -131,6 +142,32 @@ class ColumnResampler:
             return pd.NA
         return mode_vals.iloc[0]
 
+    def _prepare_named_aggs(self, value_cols: list[str], default_aggfunc: Any) -> dict[str, tuple[str, Any]]:
+        """
+        Creates a flat dictionary for Named Aggregation.
+        Example output: {'tair_2m_mean': ('tair_2m', 'mean'), 'tair_2m_max': ('tair_2m', 'max')}
+        """
+        named_aggs = {}
+        
+        for col in value_cols:
+            mapped = self._get_mapped_aggfunc(col, self.resample_colmap)
+            if mapped is None:
+                if default_aggfunc is None:
+                    continue
+                mapped = default_aggfunc
+
+            agg_list, _ = self._normalize_agg_list(mapped)
+            
+            for agg_item in agg_list:
+                resolved_func = self._resolve_aggfunc(agg_item)
+                suffix = self._agg_name(agg_item)
+                
+                # If only one agg and no suffix forced, use original name, otherwise append suffix
+                out_name = f"{col}_{suffix}" if (len(agg_list) > 1) else col
+                named_aggs[out_name] = (col, resolved_func)
+        
+        return named_aggs
+
     def apply_resampling(
         self,
         data: pd.DataFrame,
@@ -141,107 +178,64 @@ class ColumnResampler:
         min_sample_size: int | None = None,
     ) -> pd.DataFrame:
 
-        if freq is None:
-            freq = self.default_freq
-        if freq is None:
-            raise ValueError("No resampling frequency provided. Pass 'freq' or set default_freq in ColumnResampler.")
-
-        min_samples = self.min_sample_size if min_sample_size is None else min_sample_size
+        # 1. Setup & Validation
+        freq = freq or self.default_freq
+        if not freq:
+            raise ValueError("No resampling frequency provided.")
+        
+        if min_sample_size is not None and min_sample_size < 1:
+            raise ValueError(f"min_sample_size must be >= 1. Got {min_sample_size}")
+        min_samples = (
+            min_sample_size
+            if min_sample_size is not None
+            else self.min_sample_size.get(freq, self.min_sample_size.get("default", 1))
+        )
         if min_samples < 1:
             raise ValueError(f"min_sample_size must be >= 1. Got {min_samples}")
 
-        data_copy = data.copy()
-        resample_colmap = self.resample_colmap.copy()
         groupby_cols = groupby_cols or ["station_id", "model"]
-
-        if data_copy.empty:
-            return data_copy
+        
+        if data.empty:
+            return data.copy()
+        df = data.copy()
 
         required_cols = [datetime_col] + groupby_cols
-        missing_required = [c for c in required_cols if c not in data_copy.columns]
+        missing_required = [c for c in required_cols if c not in df.columns]
         if missing_required:
             raise ValueError(f"Cannot resample without required columns: {missing_required}")
 
-        if not pd.api.types.is_datetime64_any_dtype(data_copy[datetime_col]):
-            data_copy[datetime_col] = pd.to_datetime(data_copy[datetime_col], errors="coerce")
-        data_copy.dropna(subset=[datetime_col], inplace=True)
+        # 2. Data Preparation
+        if not pd.api.types.is_datetime64_any_dtype(df[datetime_col]):
+            df[datetime_col] = pd.to_datetime(df[datetime_col], errors="coerce")
+        df = df.dropna(subset=[datetime_col])
 
-        value_cols = [c for c in data_copy.columns if c not in required_cols]
-        if not value_cols:
-            logger.info("No value columns available for resampling.")
-            return data_copy[required_cols].drop_duplicates().sort_values(by=[datetime_col] + groupby_cols)
+        # 3. Build Named Aggregations
+        value_cols = [c for c in df.columns if c not in groupby_cols + [datetime_col]]
+        named_aggs = self._prepare_named_aggs(value_cols, default_aggfunc)
 
-        missing_columns = []
-        agg_columns = []
-        agg_map: dict[str, str | Callable[[pd.Series], Any] | list[str | Callable[[pd.Series], Any]]] = {}
-        output_columns: list[str] = []
-        rename_map: dict[str, str] = {}
-        for col in value_cols:
-            mapped = self._get_mapped_aggfunc(col, resample_colmap)
-            if mapped is None:
-                if default_aggfunc is None:
-                    missing_columns.append(col)
-                    continue
-                mapped = default_aggfunc
-            agg_columns.append(col)
-            agg_list, force_suffix = self._normalize_agg_list(mapped)
-            resolved_list = [self._resolve_aggfunc(a) for a in agg_list]
-            if force_suffix or len(agg_list) > 1:
-                agg_map[col] = resolved_list
-                for a, r in zip(agg_list, resolved_list):
-                    desired_suffix = self._agg_name(a)
-                    actual_suffix = self._agg_name(r)
-                    output_columns.append(f"{col}_{desired_suffix}")
-                    rename_map[f"{col}_{actual_suffix}"] = f"{col}_{desired_suffix}"
-            else:
-                agg_map[col] = resolved_list[0]
-                output_columns.append(col)
-                actual_suffix = self._agg_name(resolved_list[0])
-                rename_map[f"{col}_{actual_suffix}"] = col
+        if not named_aggs:
+            return df[groupby_cols + [datetime_col]].drop_duplicates().sort_values(by=[datetime_col] + groupby_cols)
 
-        if missing_columns:
-            logger.info(
-                f"Columns missing from resample_colmap and ignored in resampling: {missing_columns}"
-            )
+        # 4. Perform Resampling
+        # We use pd.Grouper inside groupby to handle everything in one go
+        grouper = [pd.Grouper(key=datetime_col, freq=freq)] + groupby_cols
+        resampled = df.groupby(grouper, dropna=False).agg(**named_aggs)
 
-        if not agg_columns:
-            logger.info("No value columns selected for resampling after aggregation mapping.")
-            return data_copy[required_cols].drop_duplicates().sort_values(by=[datetime_col] + groupby_cols)
+        # 5. Handle Min Sample Size (Efficiently)
+        if min_samples > 1:
+            # Count non-NA values for the original columns
+            counts = df.groupby(grouper, dropna=False)[value_cols].count()
+            
+            # For every new column, mask it based on the count of its source column
+            for out_col, (src_col, _) in named_aggs.items():
+                resampled[out_col] = resampled[out_col].where(counts[src_col] >= min_samples)
 
-        results = []
-        for group_vals, group_df in data_copy.groupby(groupby_cols, sort=False, dropna=False):
-            group_df = group_df.sort_values(datetime_col).set_index(datetime_col)
-            group_resampled = group_df[agg_columns].resample(freq).agg(agg_map)
-            if min_samples > 1:
-                point_count = group_df[agg_columns].resample(freq).count()
-                if isinstance(group_resampled.columns, pd.MultiIndex):
-                    count_aligned = point_count.reindex(columns=group_resampled.columns, level=0)
-                    group_resampled = group_resampled.where(count_aligned >= min_samples)
-                else:
-                    group_resampled = group_resampled.where(point_count >= min_samples)
-            group_resampled = group_resampled.reset_index()
-            if isinstance(group_resampled.columns, pd.MultiIndex):
-                group_resampled.columns = [
-                    c[0] if c[1] == "" else f"{c[0]}_{c[1]}"
-                    for c in group_resampled.columns
-                ]
-                if rename_map:
-                    group_resampled = group_resampled.rename(columns=rename_map)
-
-            if not isinstance(group_vals, tuple):
-                group_vals = (group_vals,)
-            for col_name, col_val in zip(groupby_cols, group_vals):
-                group_resampled[col_name] = col_val
-
-            results.append(group_resampled)
-
-        if not results:
-            return pd.DataFrame(columns=required_cols + output_columns)
-
-        out = pd.concat(results, ignore_index=True)
-        out = out[groupby_cols + [datetime_col] + output_columns]
-        out.sort_values(by=[datetime_col] + groupby_cols, inplace=True)
-        return out
+        # 6. Final Formatting
+        resampled = resampled.reset_index()
+        
+        # Ensure column order matches groupby_cols + datetime + values
+        final_cols = groupby_cols + [datetime_col] + list(named_aggs.keys())
+        return resampled[final_cols].sort_values(by=[datetime_col] + groupby_cols)
 
 
 if __name__ == "__main__":

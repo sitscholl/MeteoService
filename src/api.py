@@ -119,7 +119,7 @@ async def query_timeseries_get(
         ),
         agg: Optional[str] = Query(
             None,
-            description="Optional aggregation frequency. Use '1D' for daily aggregation.",
+            description="Optional aggregation frequency. Use '1D' for daily or '1H' for hourly aggregation.",
         ),
         min_size: Optional[int] = Query(
             None,
@@ -146,10 +146,15 @@ async def query_timeseries_get(
         agg_norm = agg.strip().lower()
         if agg_norm in {"d", "1d"}:
             agg = "1D"
+        elif agg_norm in {"h", "1h"}:
+            agg = "1H"
         else:
-            raise HTTPException(status_code=400, detail="Only daily aggregation is supported currently. Use agg=1D.")
+            raise HTTPException(
+                status_code=400,
+                detail="Only hourly or daily aggregation is supported currently. Use agg=1H or agg=1D.",
+            )
     elif min_size is not None:
-        raise HTTPException(status_code=400, detail="min_size requires aggregation. Use agg=1D.")
+        raise HTTPException(status_code=400, detail="min_size requires aggregation. Use agg=1H or agg=1D.")
 
     # Support comma-separated fallback (besides repeated ?variables=)
     if variables:
