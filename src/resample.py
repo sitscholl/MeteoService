@@ -44,16 +44,27 @@ class ColumnResampler:
     def __init__(
         self,
         resample_colmap: dict[str, str | Callable | list[str | Callable] | tuple[str | Callable, ...]] | None = None,
-        min_sample_size: int = 1,
+        min_sample_size: int | dict[str, int] = 1,
         default_freq: str | None = None,
         day_start_hour: int | None = None,
         day_end_hour: int | None = None,
     ):
-        if min_sample_size < 1:
-            raise ValueError(f"min_sample_size must be >= 1. Got {min_sample_size}")
+        if isinstance(min_sample_size, dict):
+            for key, value in min_sample_size.items():
+                if not isinstance(value, int):
+                    raise ValueError(f"min_sample_size value for '{key}' must be int. Got {type(value)}")
+                if value < 1:
+                    raise ValueError(f"min_sample_size must be >= 1. Got {value} for '{key}'")
+            normalized_min_sample_size = min_sample_size.copy()
+        else:
+            if not isinstance(min_sample_size, int):
+                raise ValueError(f"min_sample_size must be int or dict[str, int]. Got {type(min_sample_size)}")
+            if min_sample_size < 1:
+                raise ValueError(f"min_sample_size must be >= 1. Got {min_sample_size}")
+            normalized_min_sample_size = {"default": min_sample_size}
 
         self.default_freq = default_freq
-        self.min_sample_size = min_sample_size
+        self.min_sample_size = normalized_min_sample_size
         self.day_start_hour = day_start_hour
         self.day_end_hour = day_end_hour
         self.resample_colmap = (
@@ -172,7 +183,13 @@ class ColumnResampler:
         if not freq:
             raise ValueError("No resampling frequency provided.")
         
-        min_samples = self.min_sample_size if min_sample_size is None else min_sample_size
+        if min_sample_size is not None and min_sample_size < 1:
+            raise ValueError(f"min_sample_size must be >= 1. Got {min_sample_size}")
+        min_samples = (
+            min_sample_size
+            if min_sample_size is not None
+            else self.min_sample_size.get(freq, self.min_sample_size.get("default", 1))
+        )
         if min_samples < 1:
             raise ValueError(f"min_sample_size must be >= 1. Got {min_samples}")
 

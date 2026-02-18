@@ -55,7 +55,11 @@ class RuntimeContext:
         self.default_timezone = config.get('api', {}).get('default_timezone', 'Europe/Rome')
         
         ## Resampling settings
-        self.resample_min_sample_size = int(config.get('resampling', {}).get('min_sample_size', 1))
+        min_sample_size_cfg = config.get('resampling', {}).get('min_sample_size', 1)
+        if isinstance(min_sample_size_cfg, dict):
+            self.resample_min_sample_size = min_sample_size_cfg
+        else:
+            self.resample_min_sample_size = int(min_sample_size_cfg)
         self.resample_colmap = (
             config.get('resampling', {}).get('column_aggfuncs', DEFAULT_RESAMPLE_COLMAP).copy()
         )
