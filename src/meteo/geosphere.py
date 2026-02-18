@@ -262,6 +262,14 @@ class GeoSphere(BaseMeteoHandler):
                 logger.warning(f"No data found for {data_params}")
                 return None
 
+            # Drop the first row if it only contains null parameter values (common at reference start)
+            param_cols = [c for c in response_data.columns if c != 'datetime']
+            if param_cols and response_data[param_cols].iloc[0].isna().all():
+                response_data = response_data.iloc[1:].reset_index(drop=True)
+                if len(response_data) == 0:
+                    logger.warning(f"No data left after dropping leading nulls for {data_params}")
+                    return None
+
             # Fix accumulated parameters
             accumulated = [i for i in sensors if i in _ACCUMULATED_PARAMS.get(model, [])]
             if len(accumulated) > 0:
