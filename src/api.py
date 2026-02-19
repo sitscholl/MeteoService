@@ -147,7 +147,7 @@ async def query_timeseries_get(
         if agg_norm in {"d", "1d"}:
             agg = "1D"
         elif agg_norm in {"h", "1h"}:
-            agg = "1H"
+            agg = "1h"
         else:
             raise HTTPException(
                 status_code=400,
