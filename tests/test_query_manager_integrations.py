@@ -128,9 +128,14 @@ async def test_provider_fetching(provider_station, timezone_name, runtime, workf
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
     assert not response.empty
+    assert response.datetime.min() >= start_round
+    assert response.datetime.max() <= end_round
     assert len(pending) == len(full_range)
     assert all([i in full_range.values for i in response.datetime.values])
     assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
+    assert response.model.unique()[0] == "observation"
+    assert response.datetime.is_monotonic_increasing
+    assert response.datetime.is_unique
 
     ## Test gap at start of existing data
     start_time2 = dt(2025, 5, 20, tzinfo = tz)
@@ -146,9 +151,14 @@ async def test_provider_fetching(provider_station, timezone_name, runtime, workf
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
     assert not response.empty
+    assert response.datetime.min() >= start2_round
+    assert response.datetime.max() <= end2_round
     assert len(pending) == len(range2_before)-1 #overlap gets removed
     assert all([i in range2.values for i in response.datetime.values])
     assert str(response.datetime.dt.tz) == str(start_time2.tzinfo)
+    assert response.model.unique()[0] == "observation"
+    assert response.datetime.is_monotonic_increasing
+    assert response.datetime.is_unique
 
     ## Test gap at end of existing data
     start_time3 = dt(2025, 6, 20, tzinfo = tz)
@@ -164,9 +174,14 @@ async def test_provider_fetching(provider_station, timezone_name, runtime, workf
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
     assert not response.empty
+    assert response.datetime.min() >= start3_round
+    assert response.datetime.max() <= end3_round
     assert len(pending) == len(range3_after)-1
     assert all([i in range3.values for i in response.datetime.values])
     assert str(response.datetime.dt.tz) == str(start_time3.tzinfo)
+    assert response.model.unique()[0] == "observation"
+    assert response.datetime.is_monotonic_increasing
+    assert response.datetime.is_unique
 
     ## Test with now gap, i.e. all data already cached
 
@@ -182,9 +197,14 @@ async def test_provider_fetching(provider_station, timezone_name, runtime, workf
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
     assert not response.empty
+    assert response.datetime.min() >= start4_round
+    assert response.datetime.max() <= end4_round
     assert pending.empty
     assert all([i in range4.values for i in response.datetime.values])
     assert str(response.datetime.dt.tz) == str(start_time4.tzinfo)
+    assert response.model.unique()[0] == "observation"
+    assert response.datetime.is_monotonic_increasing
+    assert response.datetime.is_unique
 
 @pytest.mark.asyncio
 async def test_province_dst_changes(runtime, workflow):
