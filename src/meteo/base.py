@@ -156,26 +156,26 @@ class BaseMeteoHandler(ABC):
                 "station_id": pa.Column(str, nullable = False),
                 "model": pa.Column(str, nullable = False),
 
-                "tair_2m.+": pa.Column(float, nullable=True, required = False, regex = True),                           # Temperature 2m
-                "tsoil_25cm": pa.Column(float, nullable=True, required=False),     # Soil temperature -25cm
-                "tdry_60cm": pa.Column(float, nullable=True, required=False),           # Dry temperature 60cm
-                "twet_60cm": pa.Column(float, nullable=True, required=False),           # Wet temperature
-                "relative_humidity": pa.Column(float, pa.Check.between(0, 100), nullable=True, required=False),           # Relative humidity
-                "wind_speed": pa.Column(float, nullable=True, required=False),         # Wind speed
-                "wind_gust": pa.Column(float, nullable=True, required=False),      # Max wind gust
-                "wind_direction": pa.Column(float, nullable = True, required = False),
-                "precipitation.+": pa.Column(float, nullable=True, required = False, regex = True),                        # Precipitation
-                "irrigation": pa.Column(int, nullable=True, required=False),         # Irrigation
-                "leaf_wetness": pa.Column(float, nullable=True, required=False),           # Leaf wetness
-                "millsperiode_start": pa.Column(float, nullable=True, required=False),          # Beginn Millsperiode
+                "tair_2m.+": pa.Column(float, nullable=True, required = False, regex = True, coerce = True),                           # Temperature 2m
+                "tsoil_25cm": pa.Column(float, nullable=True, required=False, coerce = True),     # Soil temperature -25cm
+                "tdry_60cm": pa.Column(float, nullable=True, required=False, coerce = True),           # Dry temperature 60cm
+                "twet_60cm": pa.Column(float, nullable=True, required=False, coerce = True),           # Wet temperature
+                "relative_humidity": pa.Column(float, pa.Check.between(0, 100), nullable=True, required=False, coerce = True),           # Relative humidity
+                "wind_speed": pa.Column(float, nullable=True, required=False, coerce = True),         # Wind speed
+                "wind_gust": pa.Column(float, nullable=True, required=False, coerce = True),      # Max wind gust
+                "wind_direction": pa.Column(float, nullable = True, required = False, coerce = True),
+                "precipitation.+": pa.Column(float, nullable=True, required = False, regex = True, coerce = True),                        # Precipitation
+                "irrigation": pa.Column(float, nullable=True, required=False, coerce = True),         # Irrigation
+                "leaf_wetness": pa.Column(float, nullable=True, required=False, coerce = True),           # Leaf wetness
+                "millsperiode_start": pa.Column(float, nullable=True, required=False, coerce = True),          # Beginn Millsperiode
                 "rain_start": pa.Column(pd.Timestamp, nullable=True, required=False),
-                "air_pressure": pa.Column(float, nullable = True, required = False),
-                "sun_duration.+": pa.Column(float, nullable = True, required = False, regex = True),
-                "solar_radiation.+": pa.Column(float, nullable = True, required = False, regex = True),
-                "cloud_cover.+": pa.Column(float, pa.Check.between(0, 100), nullable = True, required = False, regex = True),
-                "snow_height": pa.Column(float, nullable = True, required = False),
-                "water_level": pa.Column(float, nullable = True, required = False),
-                "discharge": pa.Column(float, nullable = True, required = False),
+                "air_pressure": pa.Column(float, nullable = True, required = False, coerce = True),
+                "sun_duration.+": pa.Column(float, nullable = True, required = False, regex = True, coerce = True),
+                "solar_radiation.+": pa.Column(float, nullable = True, required = False, regex = True, coerce = True),
+                "cloud_cover.+": pa.Column(float, pa.Check.between(0, 100), nullable = True, required = False, regex = True, coerce = True),
+                "snow_height": pa.Column(float, nullable = True, required = False, coerce = True),
+                "water_level": pa.Column(float, nullable = True, required = False, coerce = True),
+                "discharge": pa.Column(float, nullable = True, required = False, coerce = True),
 
             },
             index=pa.Index(int),
