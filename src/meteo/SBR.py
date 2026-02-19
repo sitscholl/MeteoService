@@ -322,6 +322,11 @@ class SBRMeteo(BaseMeteoHandler):
             
         raw_data = raw_data.rename(columns = SBR_RENAME)
         raw_data['model'] = 'observation'
+
+        if raw_data[['datetime', 'station_id', 'model']].duplicated().any():
+            logger.warning("Found duplicates for ['datetime', 'station_id', 'model']. They will be dropped")
+            raw_data.drop_duplicates(subset = ['datetime', 'station_id', 'model'], inplace = True)
+
         return raw_data
 
     def _extract_data_from_response(
