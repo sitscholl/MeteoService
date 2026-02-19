@@ -68,8 +68,8 @@ async def _run_query(workflow, provider_handler, station_id, start_time, end_tim
 
 _PROVINCE_TEST_STATIONS = ["01110MS", "23200MS", "89190MS"] #, "65350MS", "41000MS", "31410MS"]
 _SBR_TEST_STATIONS = ["103", "113", "96"] #, "137", "140", "12"]
-_OPENMETEO_TEST_STATIONS = ['latsch', 'mals', 'bozen']
-_GEOSPHERE_TEST_STATIONS = ['latsch', 'mals', 'bozen']
+_OPENMETEO_TEST_MODELS = ["italia_meteo_arpae_icon_2i", "meteoswiss_icon_seamless", "meteofrance_seamless"]
+_GEOSPHERE_TEST_MODELS = ["nowcast-v1-15min-1km", "ensemble-v1-1h-2500m", "nwp-v1-1h-2500m"]
 
 @pytest.fixture
 def runtime(tmp_path):
@@ -97,11 +97,11 @@ def provider_station(request):
 @pytest.fixture(
     scope="session",
     params=[
-        *[("open-meteo", station_id) for station_id in _OPENMETEO_TEST_STATIONS],
-        *[("geosphere", station_id) for station_id in _GEOSPHERE_TEST_STATIONS],
+        *[("open-meteo", model) for model in _OPENMETEO_TEST_MODELS],
+        *[("geosphere", model) for model in _GEOSPHERE_TEST_MODELS],
     ],
 )
-def forecast_provider_station(request):
+def forecast_provider_model(request):
     return request.param
 
 
@@ -317,8 +317,8 @@ async def test_raise_future_start_time(provider_station, workflow, runtime):
         response, pending = await workflow.run_timeseries_query(q)
 
 @pytest.mark.asyncio
-async def test_forecast_timezone_equivalence(forecast_provider_station, workflow, runtime):
-    provider, station_id = forecast_provider_station
+async def test_forecast_timezone_equivalence(forecast_provider_model, workflow, runtime):
+    provider, model = forecast_provider_model
 
     rome_tz = pytz.timezone("Europe/Rome")
     local_start = datetime.now().astimezone(rome_tz)
@@ -331,16 +331,18 @@ async def test_forecast_timezone_equivalence(forecast_provider_station, workflow
     resp_utc, _ = await _run_query(
         workflow,
         runtime.provider_manager.get_provider(provider),
-        station_id,
+        "latsch",
         utc_start,
         utc_end,
+        model
     )
     resp_local, _ = await _run_query(
         workflow,
         runtime.provider_manager.get_provider(provider),
-        station_id,
+        "latsch",
         local_start,
         local_end,
+        model
     )
 
     df_utc = _normalize_response(resp_utc, coerce_to_utc=True)
@@ -352,15 +354,15 @@ async def test_forecast_timezone_equivalence(forecast_provider_station, workflow
     assert df_utc.equals(df_local)
 
 @pytest.mark.asyncio
-async def test_forecast_raise_multiple_models(forecast_provider_station, workflow):
-    provider, station_id = forecast_provider_station
+async def test_forecast_raise_multiple_models(forecast_provider_model, workflow):
+    provider, model = forecast_provider_model
     start = datetime.now()
     end = datetime.now() + timedelta(days = 10)
     models = ['meteoswiss_icon_seamless', 'best_match']
 
     q = TimeseriesQuery(
         provider=provider,
-        station_id=station_id,
+        station_id="latsch",
         start_time = start,
         end_time = end,
         models = models
@@ -370,34 +372,38 @@ async def test_forecast_raise_multiple_models(forecast_provider_station, workflo
         response, pending = await workflow.run_timeseries_query(q)
 
 @pytest.mark.asyncio
-async def test_forecast_fetching(forecast_provider_station, timezone_name, runtime, workflow):
+async def test_forecast_fetching(forecast_provider_model, timezone_name, runtime, workflow):
     ## Query full timeseries and test result
-    provider, station_id = forecast_provider_station
+    provider, model = forecast_provider_model
     tz = pytz.timezone(timezone_name)
     start_time = datetime.now(tz = tz)
     end_time = start_time + timedelta(days = 10)
 
     provider_handler = runtime.provider_manager.get_provider(provider)
 
-    start_round, end_round = _round_start_end_to_freq(start_time, end_time, freq = provider_handler.get_freq())
-    full_range = pd.date_range(start=start_round, end=end_round, freq=provider_handler.get_freq(), inclusive="both")
+    async with provider_handler as prv:
+        start_round, end_round = _round_start_end_to_freq(start_time, end_time, freq = prv.get_freq([model]))
+        full_range = pd.date_range(start=start_round, end=end_round, freq=prv.get_freq([model]), inclusive="both")
 
-    response, pending = await _run_query(workflow, provider_handler, station_id, start_time, end_time, db = runtime.db)
+    response, pending = await _run_query(workflow, provider_handler, "latsch", start_time, end_time, model = model, db = runtime.db)
 
     response = _normalize_response(response)
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
     assert not response.empty
-    assert len(pending) == len(full_range)
+    assert pending.empty
     assert response.datetime.min() >= start_round
     assert response.datetime.max() <= end_round
-    assert all([i in full_range.values for i in response.datetime.values]) #not applicable because many forecast providers return the full day even if only until certain hour queried
+    assert all([i in full_range.values for i in response.datetime.values])
     assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
+    assert response.model.unique()[0] == model
+    assert response.datetime.is_monotonic_increasing
+    assert response.datetime.is_unique
 
 @pytest.mark.asyncio
-async def test_forecast_fetching_daily(forecast_provider_station, runtime, workflow):
+async def test_forecast_fetching_daily(forecast_provider_model, runtime, workflow):
     ## Query full timeseries and test result
-    provider, station_id = forecast_provider_station
+    provider, model = forecast_provider_model
     tz = pytz.timezone("UTC")
     agg = "1D"
     start_time = datetime.now(tz = tz)
@@ -405,24 +411,29 @@ async def test_forecast_fetching_daily(forecast_provider_station, runtime, workf
 
     provider_handler = runtime.provider_manager.get_provider(provider)
 
-    response, pending = await _run_query(workflow, provider_handler, station_id, start_time, end_time, db = runtime.db, agg = agg)
+    response, pending = await _run_query(workflow, provider_handler, "latsch", start_time, end_time, model = model, db = runtime.db, agg = agg)
 
     response = _normalize_response(response)
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
 
     assert not response.empty
     assert pending.empty
+    assert response.datetime.min() >= start_time.replace(hour = 0, minute = 0, second = 0)
+    assert response.datetime.max() <= end_time.replace(hour = 0, minute = 0, second = 0)
     deltas = response.datetime.sort_values().diff().dropna()
     assert not deltas.empty
     expected_offset = pd.tseries.frequencies.to_offset("1D")
     actual_offset = pd.tseries.frequencies.to_offset(deltas.mode().iloc[0])
     assert actual_offset == expected_offset
     assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
+    assert response.model.unique()[0] == model
+    assert response.datetime.is_monotonic_increasing
+    assert response.datetime.is_unique
 
 @pytest.mark.asyncio
-async def test_forecast_fetching_hourly(forecast_provider_station, runtime, workflow):
+async def test_forecast_fetching_hourly(forecast_provider_model, runtime, workflow):
     ## Query full timeseries and test result
-    provider, station_id = forecast_provider_station
+    provider, model = forecast_provider_model
     tz = pytz.timezone("UTC")
     agg = "1h"
     start_time = datetime.now(tz = tz)
@@ -430,7 +441,7 @@ async def test_forecast_fetching_hourly(forecast_provider_station, runtime, work
 
     provider_handler = runtime.provider_manager.get_provider(provider)
 
-    response, pending = await _run_query(workflow, provider_handler, station_id, start_time, end_time, db = runtime.db, agg = agg)
+    response, pending = await _run_query(workflow, provider_handler, "latsch", start_time, end_time, model = model, db = runtime.db, agg = agg)
 
     response = _normalize_response(response)
     pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
@@ -503,33 +514,3 @@ async def test_workflow_rejects_mismatched_timezones(workflow):
 
     with pytest.raises(ValueError, match="same timezone"):
         await workflow.run_timeseries_query(query)
-
-@pytest.mark.asyncio
-async def test_geosphere_multiple_models(runtime, workflow):
-    
-    start_time = datetime.now(tz = tz)
-    end_time = start_time + timedelta(days = 10)
-
-    provider_handler = runtime.provider_manager.get_provider("geosphere")
-
-
-    for model in ["nowcast-v1-15min-1km", "ensemble-v1-1h-2500m", "nwp-v1-1h-2500m"]:
-
-        async with provider_handler as prv:
-            start_round, end_round = _round_start_end_to_freq(start_time, end_time, freq = prv.get_freq([model]))
-            full_range = pd.date_range(start=start_round, end=end_round, freq=prv.get_freq([model]), inclusive="both")
-        
-        response, pending = await _run_query(workflow, provider_handler, 'latsch', start_time, end_time, model = model)
-
-        response = _normalize_response(response)
-        pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
-
-        assert not response.empty
-
-        response_model = response['model'].unique()[0]
-
-        assert response_model == model
-        assert not response.empty
-        assert len(pending) == len(full_range)
-        # assert all([i in full_range.values for i in response.datetime.values]) #not applicable because many forecast providers return the full day even if only until certain hour queried
-        assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
