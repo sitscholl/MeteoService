@@ -52,7 +52,7 @@ def _round_start_end_to_freq(start, end, freq):
     end_round = pd.Timestamp(end).floor(freq)
     return start_round, end_round
 
-async def _run_query(workflow, provider_handler, station_id, start_time, end_time, model = None, db = None):
+async def _run_query(workflow, provider_handler, station_id, start_time, end_time, model = None, db = None, agg: str | None = None):
     query = TimeseriesQuery(
         provider=provider_handler.provider_name,
         start_time=start_time,
@@ -60,7 +60,7 @@ async def _run_query(workflow, provider_handler, station_id, start_time, end_tim
         station_id=station_id,
         models = [model] if model is not None else None
     )
-    response, pending = await workflow.run_timeseries_query(query)
+    response, pending = await workflow.run_timeseries_query(query, agg = agg)
     if db is not None and pending is not None and not pending.empty:
         if provider_handler.cache_data:
             await db.insert_data(pending, provider_handler)
@@ -389,7 +389,51 @@ async def test_forecast_fetching(forecast_provider_station, timezone_name, runti
 
     assert not response.empty
     assert len(pending) == len(full_range)
-    # assert all([i in full_range.values for i in response.datetime.values]) #not applicable because many forecast providers return the full day even if only until certain hour queried
+    assert response.datetime.min() >= start_round
+    assert response.datetime.max() <= end_round
+    assert all([i in full_range.values for i in response.datetime.values]) #not applicable because many forecast providers return the full day even if only until certain hour queried
+    assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
+
+@pytest.mark.asyncio
+async def test_forecast_fetching_daily(forecast_provider_station, runtime, workflow):
+    ## Query full timeseries and test result
+    provider, station_id = forecast_provider_station
+    tz = pytz.timezone("UTC")
+    agg = "1D"
+    start_time = datetime.now(tz = tz)
+    end_time = start_time + timedelta(days = 10)
+
+    provider_handler = runtime.provider_manager.get_provider(provider)
+
+    response, pending = await _run_query(workflow, provider_handler, station_id, start_time, end_time, db = runtime.db, agg = agg)
+
+    response = _normalize_response(response)
+    pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
+
+    assert not response.empty
+    assert pending.empty
+    assert pd.infer_freq(response.datetime) == 'D'
+    assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
+
+@pytest.mark.asyncio
+async def test_forecast_fetching_hourly(forecast_provider_station, runtime, workflow):
+    ## Query full timeseries and test result
+    provider, station_id = forecast_provider_station
+    tz = pytz.timezone("UTC")
+    agg = "1h"
+    start_time = datetime.now(tz = tz)
+    end_time = start_time + timedelta(days = 10)
+
+    provider_handler = runtime.provider_manager.get_provider(provider)
+
+    response, pending = await _run_query(workflow, provider_handler, station_id, start_time, end_time, db = runtime.db, agg = agg)
+
+    response = _normalize_response(response)
+    pending = pending if isinstance(pending, pd.DataFrame) else pd.DataFrame()
+
+    assert not response.empty
+    assert pending.empty
+    assert pd.infer_freq(response.datetime) == 'h'
     assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
 
 @pytest.mark.asyncio
