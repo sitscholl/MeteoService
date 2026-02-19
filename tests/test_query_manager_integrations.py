@@ -418,13 +418,18 @@ async def test_forecast_fetching_daily(forecast_provider_model, runtime, workflo
 
     assert not response.empty
     assert pending.empty
-    assert response.datetime.min() >= start_time.replace(hour = 0, minute = 0, second = 0)
-    assert response.datetime.max() <= end_time.replace(hour = 0, minute = 0, second = 0)
+
+    start_floor = pd.Timestamp(start_time).floor("D")
+    assert response.datetime.min() >= start_floor
+    end_floor = pd.Timestamp(end_time).floor("D")
+    assert response.datetime.max() <= end_floor
+    
     deltas = response.datetime.sort_values().diff().dropna()
     assert not deltas.empty
     expected_offset = pd.tseries.frequencies.to_offset("1D")
     actual_offset = pd.tseries.frequencies.to_offset(deltas.mode().iloc[0])
     assert actual_offset == expected_offset
+    
     assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
     assert response.model.unique()[0] == model
     assert response.datetime.is_monotonic_increasing
@@ -448,12 +453,22 @@ async def test_forecast_fetching_hourly(forecast_provider_model, runtime, workfl
 
     assert not response.empty
     assert pending.empty
+
+    start_floor = pd.Timestamp(start_time).floor("h")
+    assert response.datetime.min() >= start_floor
+    end_floor = pd.Timestamp(end_time).floor("h")
+    assert response.datetime.max() <= end_floor
+
     deltas = response.datetime.sort_values().diff().dropna()
     assert not deltas.empty
-    expected_offset = pd.tseries.frequencies.to_offset("1H")
+    expected_offset = pd.tseries.frequencies.to_offset("1h")
     actual_offset = pd.tseries.frequencies.to_offset(deltas.mode().iloc[0])
     assert actual_offset == expected_offset
+
     assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
+    assert response.model.unique()[0] == model
+    assert response.datetime.is_monotonic_increasing
+    assert response.datetime.is_unique
 
 @pytest.mark.asyncio
 async def test_workflow_sets_query_timezone_from_aware_times(workflow):
