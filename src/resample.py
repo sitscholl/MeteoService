@@ -1,6 +1,7 @@
 import pandas as pd
 
 import logging
+import functools
 import re
 from typing import Callable, Any, Iterable
 
@@ -78,12 +79,14 @@ class ColumnResampler:
             logger.info(f"Column '{column}' not found in resample_colmap. Add new entry.")
         self.resample_colmap[column] = aggfunc
 
-    def _resolve_aggfunc(self, aggfunc: str | Callable):
+    def _resolve_aggfunc(self, aggfunc: str | Callable, datetime_series: pd.Series | None = None):
         if callable(aggfunc):
             return aggfunc
         aggfunc_norm = aggfunc.strip().lower()
         if aggfunc_norm == "weather_mode":
-            return self._weather_code_mode
+            if datetime_series is None:
+                return self._weather_code_mode
+            return functools.partial(self._weather_code_mode, datetimes=datetime_series)
         if aggfunc_norm not in self._AGG_STR_TO_FUNC:
             raise ValueError(
                 f"Invalid aggregation function '{aggfunc}'. "
@@ -115,7 +118,7 @@ class ColumnResampler:
             return aggfunc.strip().lower()
         return getattr(aggfunc, "__name__", "custom")
 
-    def _weather_code_mode(self, series: pd.Series):
+    def _weather_code_mode(self, series: pd.Series, datetimes: pd.Series | None = None):
         if series is None or series.empty:
             return pd.NA
         s = series.dropna()
@@ -125,15 +128,22 @@ class ColumnResampler:
         start_hour = self.day_start_hour
         end_hour = self.day_end_hour
         if start_hour is not None and end_hour is not None:
-            hours = s.index.hour
-            if start_hour == end_hour:
-                pass
-            elif start_hour < end_hour:
-                mask = (hours >= start_hour) & (hours < end_hour)
-                s = s[mask]
+            if datetimes is not None:
+                dt = pd.to_datetime(datetimes.loc[s.index], errors="coerce")
+                hours = dt.dt.hour
+            elif isinstance(s.index, pd.DatetimeIndex):
+                hours = s.index.hour
             else:
-                mask = (hours >= start_hour) | (hours < end_hour)
-                s = s[mask]
+                hours = None
+            if hours is not None:
+                if start_hour == end_hour:
+                    pass
+                elif start_hour < end_hour:
+                    mask = (hours >= start_hour) & (hours < end_hour)
+                    s = s[mask]
+                else:
+                    mask = (hours >= start_hour) | (hours < end_hour)
+                    s = s[mask]
             if s.empty:
                 return pd.NA
 
@@ -142,7 +152,12 @@ class ColumnResampler:
             return pd.NA
         return mode_vals.iloc[0]
 
-    def _prepare_named_aggs(self, value_cols: list[str], default_aggfunc: Any) -> dict[str, tuple[str, Any]]:
+    def _prepare_named_aggs(
+        self,
+        value_cols: list[str],
+        default_aggfunc: Any,
+        datetime_series: pd.Series | None,
+    ) -> dict[str, tuple[str, Any]]:
         """
         Creates a flat dictionary for Named Aggregation.
         Example output: {'tair_2m_mean': ('tair_2m', 'mean'), 'tair_2m_max': ('tair_2m', 'max')}
@@ -159,7 +174,7 @@ class ColumnResampler:
             agg_list, _ = self._normalize_agg_list(mapped)
             
             for agg_item in agg_list:
-                resolved_func = self._resolve_aggfunc(agg_item)
+                resolved_func = self._resolve_aggfunc(agg_item, datetime_series=datetime_series)
                 suffix = self._agg_name(agg_item)
                 
                 # If only one agg and no suffix forced, use original name, otherwise append suffix
@@ -211,7 +226,7 @@ class ColumnResampler:
 
         # 3. Build Named Aggregations
         value_cols = [c for c in df.columns if c not in groupby_cols + [datetime_col]]
-        named_aggs = self._prepare_named_aggs(value_cols, default_aggfunc)
+        named_aggs = self._prepare_named_aggs(value_cols, default_aggfunc, df[datetime_col])
 
         if not named_aggs:
             return df[groupby_cols + [datetime_col]].drop_duplicates().sort_values(by=[datetime_col] + groupby_cols)
