@@ -43,7 +43,7 @@ api:
 
 resampling:
   min_sample_size:
-    1H: 1
+    1h: 1
     1D: 10
   day_start_hour: 6
   day_end_hour: 18

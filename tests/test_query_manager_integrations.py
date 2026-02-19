@@ -424,16 +424,19 @@ async def test_forecast_fetching_daily(forecast_provider_model, runtime, workflo
     end_floor = pd.Timestamp(end_time).floor("D")
     assert response.datetime.max() <= end_floor
     
-    deltas = response.datetime.sort_values().diff().dropna()
-    assert not deltas.empty
-    expected_offset = pd.tseries.frequencies.to_offset("1D")
-    actual_offset = pd.tseries.frequencies.to_offset(deltas.mode().iloc[0])
-    assert actual_offset == expected_offset
-    
     assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
     assert response.model.unique()[0] == model
-    assert response.datetime.is_monotonic_increasing
-    assert response.datetime.is_unique
+
+    #nowcast model only covers a few hours in future, so these tests are not required
+    if model != "nowcast-v1-15min-1km":
+        deltas = response.datetime.sort_values().diff().dropna()
+        assert not deltas.empty
+        expected_offset = pd.tseries.frequencies.to_offset("1D")
+        actual_offset = pd.tseries.frequencies.to_offset(deltas.mode().iloc[0])
+        assert actual_offset == expected_offset
+        
+        assert response.datetime.is_monotonic_increasing
+        assert response.datetime.is_unique
 
 @pytest.mark.asyncio
 async def test_forecast_fetching_hourly(forecast_provider_model, runtime, workflow):
