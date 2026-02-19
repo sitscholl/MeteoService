@@ -15,6 +15,12 @@ _ACCUMULATED_PARAMS = {
     "nwp-v1-1h-2500m": ["rr_acc", "sundur_acc", "grad"]
 }
 
+_GEOSPHERE_MODEL_FREQS = {
+    "nowcast-v1-15min-1km": "15min",
+    "ensemble-v1-1h-2500m": "1h",
+    "nwp-v1-1h-2500m": "1h",
+}
+
 _GEOSPHERE_RENAME = {
     "t2m": "tair_2m",
     "t2m_p10": "tair_2m_p10",
@@ -135,7 +141,16 @@ class GeoSphere(BaseMeteoHandler):
             return "1h"
 
         if self.model_info is None:
-            raise ValueError("Run _get_model_info() first before querying freq for a specific model")
+            logger.warning("Using fixed model frequency from _GEOSPHERE_MODEL_FREQS as self.model_info has not been initialized.")
+            freqs = { _GEOSPHERE_MODEL_FREQS.get(m) for m in models }
+            if None in freqs:
+                raise ValueError(f"No frequency for selected models found. Got {models}")
+            if len(freqs) > 1:
+                raise ValueError(
+                    f"GeoSphere models have mixed frequencies: {sorted(freqs)}. "
+                    "Query models with the same frequency together."
+                )
+            return next(iter(freqs))
 
         freqs = {self.model_info[m].freq for m in models}
         if len(freqs) > 1:
