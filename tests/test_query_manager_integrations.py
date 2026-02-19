@@ -412,7 +412,11 @@ async def test_forecast_fetching_daily(forecast_provider_station, runtime, workf
 
     assert not response.empty
     assert pending.empty
-    assert pd.infer_freq(response.datetime) == 'D'
+    deltas = response.datetime.sort_values().diff().dropna()
+    assert not deltas.empty
+    expected_offset = pd.tseries.frequencies.to_offset("1D")
+    actual_offset = pd.tseries.frequencies.to_offset(deltas.mode().iloc[0])
+    assert actual_offset == expected_offset
     assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
 
 @pytest.mark.asyncio
@@ -433,7 +437,11 @@ async def test_forecast_fetching_hourly(forecast_provider_station, runtime, work
 
     assert not response.empty
     assert pending.empty
-    assert pd.infer_freq(response.datetime) == 'h'
+    deltas = response.datetime.sort_values().diff().dropna()
+    assert not deltas.empty
+    expected_offset = pd.tseries.frequencies.to_offset("1H")
+    actual_offset = pd.tseries.frequencies.to_offset(deltas.mode().iloc[0])
+    assert actual_offset == expected_offset
     assert str(response.datetime.dt.tz) == str(start_time.tzinfo)
 
 @pytest.mark.asyncio
