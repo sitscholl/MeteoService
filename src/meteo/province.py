@@ -248,6 +248,9 @@ class ProvinceMeteo(BaseMeteoHandler):
         # Precipitation is available in 5min freq while all others are in 10min freq. Drop additional timestamps for precipitation
         df_pivot = df_pivot.dropna(subset = [i for i in df_pivot.columns if i not in ['datetime', 'station_id', 'precipitation']], how = 'all')
 
+        if "relative_humidity" in df_pivot.columns:
+            df_pivot["relative_humidity"] = df_pivot["relative_humidity"].clip(lower = 0, upper = 100)
+
         df_pivot['model'] = 'observation'
         return df_pivot
 
