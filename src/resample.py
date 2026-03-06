@@ -20,7 +20,7 @@ DEFAULT_RESAMPLE_COLMAP: dict[str, str | list[str]] = {
     "irrigation": "max",
     "leaf_wetness": "mean",
     "air_pressure": "mean",
-    "sun_duration": "mean",
+    "sun_duration": "sum",
     "solar_radiation": "sum",
     "snow_height": "mean",
     "water_level": "mean",
