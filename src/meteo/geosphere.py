@@ -112,16 +112,27 @@ class GeoSphere(BaseMeteoHandler):
         if self._client is None:
             raise ValueError("Initialize client before requesting model info")
 
-        model_info_dict = {}
-        for m in self.models:
-            try:
-                logger.debug(f"Loading metadata for model {m}")
-                response = await self._client.get(self.timeseries_url + f"/{m}/metadata", timeout=self.timeout)
-                response.raise_for_status()
+        async def _fetch_model_info_task(m):
+            n = 1
+            while n <= 3:
+                try:
+                    logger.debug(f"Loading metadata for model {m} (attempt: {n})")
+                    response = await self._client.get(self.timeseries_url + f"/{m}/metadata", timeout=self.timeout)
+                    response.raise_for_status()
+                    return m, ModelInfo.from_json(response.json())
+                except Exception as e:
+                    logger.exception(f"Failed to load model info for model {m} on attempt {n}: {e}")
+                    n += 1
+                    await asyncio.sleep(10)
+            logger.error(f'Unable to load model info for model {m} after {n} attempts')
+            return m, None
 
-                model_info_dict[m] = ModelInfo.from_json(response.json())
-            except Exception as e:
-                logger.exception(f"Failed to load model info for model {m}: {e}")
+        model_info_dict = {}
+        model_info_tasks = [asyncio.create_task(_fetch_model_info_task(m)) for m in self.models]
+        for task in asyncio.as_completed(model_info_tasks):
+            m, mod_info = await task
+            if mod_info is not None:
+                model_info_dict[m] = mod_info
         
         self.model_info = model_info_dict
         self.models = list(self.model_info.keys()) #remove models that failed and have no info
