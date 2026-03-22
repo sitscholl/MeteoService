@@ -44,6 +44,7 @@ class ProvinceMeteo(BaseMeteoHandler):
         return "both"
 
     async def get_sensors(self, station_code: str):
+        station_code = str(station_code)
         if self.station_sensors.get(station_code) is not None:
             return self.station_sensors.get(station_code)
 
@@ -82,12 +83,16 @@ class ProvinceMeteo(BaseMeteoHandler):
 
         if self.station_info is not None:
             if station_id is not None:
+                station_id = str(station_id)
                 return self.station_info.get(station_id, {})
             return self.station_info
 
         async with self._station_info_lock:
 
             if self.station_info is not None:
+                if station_id is not None:
+                    station_id = str(station_id)
+                    return self.station_info.get(station_id, {})
                 return self.station_info
 
             if self._client is None:
@@ -107,18 +112,20 @@ class ProvinceMeteo(BaseMeteoHandler):
             info_dict = {}
             for i in response_data['features']:
                 station_props = i['properties']
+                station_key = str(station_props['SCODE'])
                 station_info = {
                     'latitude': station_props.get('LAT'),
                     'longitude': station_props.get('LONG'),
                     'elevation': station_props.get('ALT'),
                     'name': station_props.get('NAME_D'),
-                    'id': station_props['SCODE']
+                    'id': station_key
                 }
-                info_dict[station_props['SCODE']] = station_info
+                info_dict[station_key] = station_info
 
             self.station_info = info_dict
 
             if station_id is not None:
+                station_id = str(station_id)
                 return self.station_info.get(station_id, {})
             return self.station_info
 
@@ -168,6 +175,8 @@ class ProvinceMeteo(BaseMeteoHandler):
             sensor_codes: list[str] | None = None,
             **kwargs
         ):
+
+        station_id = str(station_id)
 
         possible_stations = await self.get_stations()
         if station_id not in possible_stations:

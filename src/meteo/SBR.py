@@ -75,7 +75,7 @@ class SBRMeteo(BaseMeteoHandler):
             try:
                 with station_info_file.open("r", encoding="utf-8") as file:
                     info_data = json.load(file)
-                self.station_info = {i['properties']['st_id']: {
+                self.station_info = {str(i['properties']['st_id']): {
                                         'latitude': i['properties'].get('lat'),
                                         'longitude': i['properties'].get('lon'),
                                         'elevation': None,
@@ -145,11 +145,9 @@ class SBRMeteo(BaseMeteoHandler):
             logger.warning("Station info not available. Cannot fetch SBR station info.")
             return {}
 
-        if isinstance(station_id, int):
-            station_id = str(station_id)
-
         if station_id is None:
             return self.station_info
+        station_id = str(station_id)
 
         station_info = self.station_info.get(station_id)
 
@@ -257,8 +255,10 @@ class SBRMeteo(BaseMeteoHandler):
             List[str]: List of raw HTML response texts from the website
         """
 
+        station_id = str(station_id)
+
         possible_stations = await self.get_stations()
-        if possible_stations and str(station_id) not in possible_stations:
+        if possible_stations and station_id not in possible_stations:
             raise ValueError(f"Invalid station_id {station_id}. Choose one from {possible_stations}")
 
         # Validate timezone awareness
@@ -271,8 +271,7 @@ class SBRMeteo(BaseMeteoHandler):
         end = end.astimezone(pytz.timezone(self.timezone))
         queue = asyncio.Queue(maxsize = self.max_concurrent_requests)
         
-        if isinstance(station_id, str):
-            station_id = int(station_id)
+        request_station_id = int(station_id)
         if end < start:
             raise ValueError(f'End date must be after start date. Got {start} - {end}')
 
@@ -284,7 +283,7 @@ class SBRMeteo(BaseMeteoHandler):
         workers = [asyncio.create_task(self._worker(queue, results = raw_responses)) for _ in range(worker_count)]
         
         producer = asyncio.create_task(
-            self._producer(queue, station_id, dates_split, data_type)
+            self._producer(queue, request_station_id, dates_split, data_type)
         )
 
         await producer

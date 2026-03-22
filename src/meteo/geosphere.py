@@ -102,7 +102,7 @@ class GeoSphere(BaseMeteoHandler):
 
     def __init__(self, locations: Dict[str, Dict], *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.locations = locations
+        self.locations = {str(i): j for i,j in locations.items()}
         self.variables = ["t2m", "rr"]
         self.models = list(_GEOSPHERE_MODELS)
         self.model_info = None
@@ -223,9 +223,11 @@ class GeoSphere(BaseMeteoHandler):
                 station_key: self._normalize_station_info(station_info)
                 for station_key, station_info in self.locations.items()
             }
+        station_id = str(station_id)
         return self._normalize_station_info(self.locations.get(station_id, {}))
 
     async def get_station_coords(self, station_id: str) -> Tuple[float, float]:
+        station_id = str(station_id)
         if station_id not in self.locations.keys():
             raise ValueError(f"Station {station_id} not found. Choose one of {self.locations.keys()}")
         info = self.locations[station_id]
@@ -330,6 +332,8 @@ class GeoSphere(BaseMeteoHandler):
             models: str | list[str] | None = None,
             **kwargs
         ) -> Tuple[pd.DataFrame | None, Dict]:
+
+        station_id = str(station_id)
 
         possible_stations = await self.get_stations()
         if station_id not in possible_stations:
