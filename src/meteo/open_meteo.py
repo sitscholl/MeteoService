@@ -64,16 +64,27 @@ class OpenMeteo(BaseMeteoHandler):
     async def get_models(self) -> list[str]:
         return list(self.models)
 
+    def _normalize_station_info(self, info: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = dict(info)
+        if 'latitude' not in normalized and 'lat' in normalized:
+            normalized['latitude'] = normalized['lat']
+        if 'longitude' not in normalized and 'lon' in normalized:
+            normalized['longitude'] = normalized['lon']
+        return normalized
+
     async def get_station_info(self, station_id: str | None) -> Dict[str, Any]:
         if station_id is None:
-            return self.locations
-        return self.locations.get(station_id, {})
+            return {
+                station_key: self._normalize_station_info(station_info)
+                for station_key, station_info in self.locations.items()
+            }
+        return self._normalize_station_info(self.locations.get(station_id, {}))
 
     async def get_station_coords(self, station_id: str) -> Tuple[float, float]:
         if station_id not in self.locations.keys():
             raise ValueError(f"Station {station_id} not found. Choose one of {self.locations.keys()}")
         info = self.locations[station_id]
-        return info['lat'], info['lon']
+        return info.get('lat', info.get('latitude')), info.get('lon', info.get('longitude'))
 
     async def _create_request_task(
         self, station_id: str, models: list[str], sensors: list[str], start=None, end=None
