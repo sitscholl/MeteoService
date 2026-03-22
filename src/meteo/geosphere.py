@@ -112,16 +112,27 @@ class GeoSphere(BaseMeteoHandler):
         if self._client is None:
             raise ValueError("Initialize client before requesting model info")
 
-        model_info_dict = {}
-        for m in self.models:
-            try:
-                logger.debug(f"Loading metadata for model {m}")
-                response = await self._client.get(self.timeseries_url + f"/{m}/metadata", timeout=self.timeout)
-                response.raise_for_status()
+        async def _fetch_model_info_task(m):
+            n = 1
+            while n <= 3:
+                try:
+                    logger.debug(f"Loading metadata for model {m} (attempt: {n})")
+                    response = await self._client.get(self.timeseries_url + f"/{m}/metadata", timeout=self.timeout)
+                    response.raise_for_status()
+                    return m, ModelInfo.from_json(response.json())
+                except Exception as e:
+                    logger.exception(f"Failed to load model info for model {m} on attempt {n}: {e}")
+                    n += 1
+                    await asyncio.sleep(10)
+            logger.error(f'Unable to load model info for model {m} after {n} attempts')
+            return m, None
 
-                model_info_dict[m] = ModelInfo.from_json(response.json())
-            except Exception as e:
-                logger.exception(f"Failed to load model info for model {m}: {e}")
+        model_info_dict = {}
+        model_info_tasks = [asyncio.create_task(_fetch_model_info_task(m)) for m in self.models]
+        for task in asyncio.as_completed(model_info_tasks):
+            m, mod_info = await task
+            if mod_info is not None:
+                model_info_dict[m] = mod_info
         
         self.model_info = model_info_dict
         self.models = list(self.model_info.keys()) #remove models that failed and have no info
@@ -198,16 +209,27 @@ class GeoSphere(BaseMeteoHandler):
     async def get_models(self) -> list[str]:
         return list(self.models)
 
+    def _normalize_station_info(self, info: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = dict(info)
+        if 'latitude' not in normalized and 'lat' in normalized:
+            normalized['latitude'] = normalized['lat']
+        if 'longitude' not in normalized and 'lon' in normalized:
+            normalized['longitude'] = normalized['lon']
+        return normalized
+
     async def get_station_info(self, station_id: str | None) -> Dict[str, Any]:
         if station_id is None:
-            return self.locations
-        return self.locations.get(station_id, {})
+            return {
+                station_key: self._normalize_station_info(station_info)
+                for station_key, station_info in self.locations.items()
+            }
+        return self._normalize_station_info(self.locations.get(station_id, {}))
 
     async def get_station_coords(self, station_id: str) -> Tuple[float, float]:
         if station_id not in self.locations.keys():
             raise ValueError(f"Station {station_id} not found. Choose one of {self.locations.keys()}")
         info = self.locations[station_id]
-        return info['lat'], info['lon']
+        return info.get('lat', info.get('latitude')), info.get('lon', info.get('longitude'))
 
     async def _create_request_task(
         self, station_id: str, model: str, sensors: list[str], end=None
