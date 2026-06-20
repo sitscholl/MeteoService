@@ -2,6 +2,7 @@ import pytz
 from datetime import datetime, timedelta
 from fastapi import HTTPException
 import logging
+import asyncio
 
 from .runtime import RuntimeContext
 from .validation import TimeseriesQuery, TimeseriesResponse, ResponseMetadata
@@ -99,7 +100,11 @@ class QueryWorkflow:
         if agg is not None and not df.empty:
             df = self.resample_columns(df, agg=agg, min_size=min_size)
 
-        station = self.runtime.db.query_station(provider=provider_handler.provider_name, external_id=query.station_id)
+        station = await asyncio.to_thread(
+            self.runtime.db.query_station,
+            provider=provider_handler.provider_name,
+            external_id=query.station_id,
+        )
         if not station or len(station) == 0:
             try:
                 logger.debug(f"Fetching station info for station {query.station_id} from provider as station is not yet in database")

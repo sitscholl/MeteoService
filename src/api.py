@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional, List, Dict
 import pytz
 import logging
+from starlette.concurrency import run_in_threadpool
 
 from . import validation as validation_module
 from .validation import TimeseriesResponse, TimeseriesQuery
@@ -60,18 +61,27 @@ async def root():
         """
     }
 
+@app.get("/health", include_in_schema=False)
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint."""
+    """Lightweight liveness check for container health probes."""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now(pytz.timezone(DEFAULT_TIMEZONE))
+    }
+
+@app.get("/api/ready")
+async def readiness_check():
+    """Readiness check that verifies database access."""
     try:
-        stations = runtime.db.query_station()
+        stations = await run_in_threadpool(runtime.db.query_station)
         return {
-            "status": "healthy",
+            "status": "ready",
             "station_count": len(stations),
             "timestamp": datetime.now(pytz.timezone(DEFAULT_TIMEZONE))
         }
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        logger.error(f"Readiness check failed: {e}")
         raise HTTPException(status_code=503, detail="Database unavailable")
 
 @app.get("/api/providers", response_model=List[str])

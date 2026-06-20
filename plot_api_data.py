@@ -4,7 +4,10 @@ import requests
 
 param_name = 'sun_duration'
 
-request = requests.get("http://localhost:8000/api/geosphere/timeseries?station_id=bozen&end_date=2026-02-15T00:00:00Z&start_date=2026-02-10T00:00:00Z&models=ensemble-v1-1h-2500m")
+request = requests.get(
+    "http://localhost:8000/api/geosphere/timeseries?station_id=bozen&end_date=2026-02-15T00:00:00Z&start_date=2026-02-10T00:00:00Z&models=ensemble-v1-1h-2500m",
+    timeout=20,
+)
 data = pd.DataFrame(request.json()['data'])
 data['datetime'] = pd.to_datetime(data['datetime'])
 

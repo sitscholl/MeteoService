@@ -117,7 +117,13 @@ class SBRMeteo(BaseMeteoHandler):
         }
 
         # Send the POST request with form data
-        login_response = await self._client.post(self.login_url, data=login_payload, headers=login_headers, follow_redirects=True)
+        login_response = await self._client.post(
+            self.login_url,
+            data=login_payload,
+            headers=login_headers,
+            follow_redirects=True,
+            timeout=self.timeout,
+        )
         login_response.raise_for_status()
 
         # Check if login was successful
@@ -209,7 +215,12 @@ class SBRMeteo(BaseMeteoHandler):
             }
 
             async with self._semaphore:
-                response = await self._client.get(self.timeseries_url, params=data_params, headers=data_headers)
+                response = await self._client.get(
+                    self.timeseries_url,
+                    params=data_params,
+                    headers=data_headers,
+                    timeout=self.timeout,
+                )
                 response.raise_for_status()
                 await asyncio.sleep(self.sleep_time)
             

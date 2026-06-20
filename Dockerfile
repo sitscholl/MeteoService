@@ -46,7 +46,7 @@ ENTRYPOINT []
 # USER nonroot
 
 # Health check
-HEALTHCHECK CMD curl -f http://localhost:8000/health
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 CMD curl --fail --silent --show-error --max-time 5 http://localhost:8000/health
 
 # Run app
 CMD ["uv", "run", "main.py"]

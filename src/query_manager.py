@@ -213,13 +213,14 @@ class QueryManager:
 
         if use_cached:
             # Get existing data from database
-            existing_data = db.query_data(
+            existing_data = await asyncio.to_thread(
+                db.query_data,
                 provider=provider_handler.provider_name,
                 station_id=station_id,
                 start_time=start_time_round,
                 end_time=end_time_round,
                 variables=variables,
-                weather_models = models
+                weather_models=models,
             )
         else:
             existing_data = pd.DataFrame()
