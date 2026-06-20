@@ -1,6 +1,7 @@
 # Configuration for meteorological data providers
 providers:
   sbr:
+    timeout: 60  # HTTP request timeout in seconds; SBR can be slow
     username: "user"
     password: "pwd"
     timezone: 'Europe/Rome'
