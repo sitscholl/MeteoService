@@ -146,6 +146,12 @@ class GeoSphere(BaseMeteoHandler):
             await self._get_model_info()
         return self
 
+    async def _initialize(self):
+        if self.model_info is not None:
+            return
+        async with self:
+            pass
+
     def get_freq(self, models: list[str] | None = None) -> str:
         
         if not models:

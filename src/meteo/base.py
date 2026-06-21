@@ -51,6 +51,8 @@ class BaseMeteoHandler(ABC):
         self.station_sensors = {}
         self._station_sensors_locks: dict[str, asyncio.Lock] = {}
         self._client = None
+        self._initialize_lock = asyncio.Lock()
+        self._initialized = False
 
     @abstractmethod
     def get_freq(self, models: list[str] | None = None) -> str:
@@ -75,6 +77,17 @@ class BaseMeteoHandler(ABC):
         raise ValueError("MeteoHandlers have to be used in an asyncronous context. Use async with...")
 
     async def _authenticate(self):
+        pass
+
+    async def initialize(self):
+        """Load provider-level metadata required before query planning."""
+        async with self._initialize_lock:
+            if self._initialized:
+                return
+            await self._initialize()
+            self._initialized = True
+
+    async def _initialize(self):
         pass
 
     async def __aenter__(self):

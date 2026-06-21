@@ -206,6 +206,8 @@ class QueryManager:
         start_time_utc = start_time.astimezone(timezone.utc)
         end_time_utc = end_time.astimezone(timezone.utc)
 
+        if hasattr(provider_handler, "initialize"):
+            await provider_handler.initialize()
         freq = self._get_provider_freq(provider_handler, models)
         start_time_round, end_time_round = self._round_range_to_freq(start_time_utc, end_time_utc, freq = freq, forecast = provider_handler.can_forecast)
         if start_time_round >= end_time_round:
