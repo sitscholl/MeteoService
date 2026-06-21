@@ -11,6 +11,8 @@ services:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Rome
       - UVICORN_WORKERS=1
+      - UVICORN_ACCESS_LOG=false
+      - METEOSERVICE_LOG_LEVEL=INFO
     restart: unless-stopped
     container_name: meteo-service
     healthcheck:
