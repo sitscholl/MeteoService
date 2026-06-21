@@ -69,8 +69,10 @@ class SBRMeteo(BaseMeteoHandler):
             #If other timezone is used, data is still returned correctly, but it does not correspond to the range start-date - end-date
 
         station_info_file = Path(self.stations_url)
+        if not station_info_file.is_absolute():
+            station_info_file = Path(__file__).resolve().parents[2] / station_info_file
         if not station_info_file.exists():
-            logger.warning(f"Station info file for SBRMeteo not found. Got {self.stations_url}")
+            logger.warning(f"Station info file for SBRMeteo not found. Got {station_info_file}")
         else:
             try:
                 with station_info_file.open("r", encoding="utf-8") as file:

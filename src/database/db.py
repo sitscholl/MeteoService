@@ -52,6 +52,66 @@ class MeteoDB:
                 query = query.filter(models.Variable.name == name)
             return query.all()
 
+    @staticmethod
+    def station_metadata_incomplete(station) -> bool:
+        return (
+            station.latitude is None
+            or station.longitude is None
+        )
+
+    @staticmethod
+    def _filter_station_info(station_info: dict | None) -> dict:
+        if station_info is None:
+            return {}
+        allowed_fields = {"name", "latitude", "longitude", "elevation", "station_metadata"}
+        return {k: v for k, v in station_info.items() if k in allowed_fields}
+
+    def update_station_info(
+        self,
+        provider: str,
+        external_id: str,
+        station_info: dict | None,
+        only_missing: bool = True,
+    ):
+        station_info = self._filter_station_info(station_info)
+        if not station_info:
+            stations = self.query_station(provider=provider, external_id=external_id)
+            return stations[0] if stations else None
+
+        session = self.Session()
+        try:
+            station = (
+                session.query(models.Station)
+                .filter(
+                    models.Station.provider == provider,
+                    models.Station.external_id == external_id,
+                )
+                .first()
+            )
+            if station is None:
+                return None
+
+            changed = False
+            for key, value in station_info.items():
+                if value is None:
+                    continue
+                if only_missing and getattr(station, key) is not None:
+                    continue
+                setattr(station, key, value)
+                changed = True
+
+            if changed:
+                session.commit()
+                logger.info(f"Updated station metadata for {provider} station {external_id}.")
+                session.refresh(station)
+            return station
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error updating station metadata for {provider} station {external_id}: {e}")
+            return None
+        finally:
+            session.close()
+
     def query_data(
             self,
             provider: str,
@@ -126,7 +186,9 @@ class MeteoDB:
         existing_station = self.query_station(provider=provider_handler.provider_name, external_id=external_id)
 
         if existing_station:
-            return existing_station[0]
+            existing_station = existing_station[0]
+            if not self.station_metadata_incomplete(existing_station):
+                return existing_station
 
         #Fetch station information
         station_info = None
@@ -145,8 +207,16 @@ class MeteoDB:
             station_info = station_info.copy()
 
         # Keep only Station fields and avoid overriding identifiers.
-        allowed_fields = {"name", "latitude", "longitude", "elevation", "station_metadata"}
-        station_info = {k: v for k, v in station_info.items() if k in allowed_fields}
+        station_info = self._filter_station_info(station_info)
+
+        if existing_station:
+            repaired_station = self.update_station_info(
+                provider=provider_handler.provider_name,
+                external_id=external_id,
+                station_info=station_info,
+                only_missing=True,
+            )
+            return repaired_station or existing_station
 
         session = self.Session()
         try:

@@ -105,17 +105,22 @@ class QueryWorkflow:
             provider=provider_handler.provider_name,
             external_id=query.station_id,
         )
-        if not station or len(station) == 0:
-            try:
+        station = station[0] if station else None
+
+        if station is None or self.runtime.db.station_metadata_incomplete(station):
+            if station is None:
                 logger.debug(f"Fetching station info for station {query.station_id} from provider as station is not yet in database")
-                async with provider_handler as prv:
-                    station_info = await prv.get_station_info(query.station_id)
-                station_info = station_info or {}
+            else:
+                logger.debug(f"Fetching station info for station {query.station_id} from provider as database metadata is incomplete")
+            try:
+                station = await self.runtime.db.insert_station(provider_handler, query.station_id)
             except Exception as e:
                 logger.exception(f"Error fetching station info for station {query.station_id}: {e}")
-                station_info = {}
+                station = None
+
+        if station is None:
+            station_info = {}
         else:
-            station = station[0]
             station_info = {"elevation": station.elevation, 'latitude': station.latitude, 'longitude': station.longitude, "name": station.name}
 
         response_metadata = ResponseMetadata.from_query(query, station_info = station_info)
