@@ -121,7 +121,7 @@ class GeoSphere(BaseMeteoHandler):
                     response.raise_for_status()
                     return m, ModelInfo.from_json(response.json())
                 except Exception as e:
-                    logger.exception(f"Failed to load model info for model {m} on attempt {n}: {e}")
+                    logger.warning(f"Failed to load model info for model {m} on attempt {n}: {e}")
                     n += 1
                     await asyncio.sleep(10)
             logger.error(f'Unable to load model info for model {m} after {n} attempts')
@@ -139,7 +139,7 @@ class GeoSphere(BaseMeteoHandler):
 
     async def __aenter__(self):
         """Start httpx client that is reused across requests"""
-        logger.info("Opening API session...")
+        logger.debug("Opening API session...")
         self._client = httpx.AsyncClient(timeout = self.timeout)
         await self._authenticate()
         if self.model_info is None:

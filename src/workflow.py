@@ -120,5 +120,8 @@ class QueryWorkflow:
 
         response_metadata = ResponseMetadata.from_query(query, station_info = station_info)
         response = TimeseriesResponse.from_dataframe(df, latest = latest, metadata = response_metadata)
+        logger.info(
+            f"Loaded {response.count} rows for {provider_handler.provider_name} station {query.station_id}"
+        )
 
         return (response, pending)

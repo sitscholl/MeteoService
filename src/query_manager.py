@@ -28,7 +28,8 @@ class QueryManager:
         end_gap: datetime,
         is_first: bool,
         is_last: bool,
-        models: list[str] | None
+        models: list[str] | None,
+        freq: str
     ):
         try:
             logger.debug(f"Fetching data gap for station {station_id} (provider={provider_handler.provider_name}) from {start_gap:%Y-%m-%d %H:%M:%S} to {end_gap:%Y-%m-%d %H:%M:%S}")
@@ -36,9 +37,9 @@ class QueryManager:
             start_gap_ext, end_gap_ext = start_gap, end_gap
             provider_inclusion = provider_handler.inclusive
             if provider_inclusion == 'left' and is_last:
-                end_gap_ext = end_gap + pd.Timedelta(provider_handler.get_freq(models))
+                end_gap_ext = end_gap + pd.Timedelta(freq)
             if provider_inclusion == 'right' and is_first:
-                start_gap_ext = start_gap - pd.Timedelta(provider_handler.get_freq(models))
+                start_gap_ext = start_gap - pd.Timedelta(freq)
 
             async with self._semaphore:
                 provider_data = await provider_handler.run(
@@ -60,7 +61,8 @@ class QueryManager:
         station_id: str,
         gaps: List[Tuple[datetime, datetime]] | None,
         all_variables: List[str],
-        models: list[str] | None = None
+        models: list[str] | None = None,
+        freq: str | None = None
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Fetch missing data and return (response_data, cache_data)."""
         
@@ -70,6 +72,8 @@ class QueryManager:
         response_data_all: list[pd.DataFrame] = []
         cache_data_all: list[pd.DataFrame] = []
         n = len(gaps)
+        if freq is None:
+            freq = self._get_provider_freq(provider_handler, models)
         async with provider_handler as prv:
             tasks = []
             for i, (start_gap, end_gap) in enumerate(gaps):
@@ -86,7 +90,7 @@ class QueryManager:
                 is_first = i == 0
 
                 task = asyncio.create_task(
-                    self._create_fetch_task(station_id, prv, start_gap, end_gap, is_first, is_last, models = models)
+                    self._create_fetch_task(station_id, prv, start_gap, end_gap, is_first, is_last, models = models, freq = freq)
                 )
 
                 tasks.append(task)
@@ -99,7 +103,7 @@ class QueryManager:
                     gap_index = pd.date_range(
                         start=pd.Timestamp(start_gap),
                         end=pd.Timestamp(end_gap),
-                        freq=prv.get_freq(models),
+                        freq=freq,
                         inclusive="both",
                     )
 
@@ -133,7 +137,7 @@ class QueryManager:
                         provider_data
                         .set_index(['station_id', 'model', 'datetime'])
                         .groupby(level=['station_id', 'model'], sort=False, group_keys=False)
-                        .apply(reindex_group, freq=prv.get_freq(models), dt_start = gap_index.min(), dt_end = gap_index.max())
+                        .apply(reindex_group, freq=freq, dt_start = gap_index.min(), dt_end = gap_index.max())
                         .reset_index()
                     )
 
@@ -202,13 +206,14 @@ class QueryManager:
         start_time_utc = start_time.astimezone(timezone.utc)
         end_time_utc = end_time.astimezone(timezone.utc)
 
-        start_time_round, end_time_round = self._round_range_to_freq(start_time_utc, end_time_utc, freq = provider_handler.get_freq(models), forecast = provider_handler.can_forecast)
+        freq = self._get_provider_freq(provider_handler, models)
+        start_time_round, end_time_round = self._round_range_to_freq(start_time_utc, end_time_utc, freq = freq, forecast = provider_handler.can_forecast)
         if start_time_round >= end_time_round:
             # Handle cases where the range is smaller than the frequency
             return pd.DataFrame(), pd.DataFrame()
 
         logger.info(
-            f"Querying data for station {station_id} (provider={provider_handler.provider_name}) from {start_time_round:%Y-%m-%d %H:%M:%S} (UTC) to {end_time_round:%Y-%m-%d %H:%M:%S} (UTC) with frequency {provider_handler.get_freq(models)}"
+            f"Querying data for {provider_handler.provider_name} station {station_id} from {start_time_round:%Y-%m-%d %H:%M:%S} (UTC) to {end_time_round:%Y-%m-%d %H:%M:%S} (UTC) with frequency {freq}"
             )
 
         if use_cached:
@@ -226,14 +231,14 @@ class QueryManager:
             existing_data = pd.DataFrame()
 
         if not existing_data.empty:
-            logger.info(f"Found existing data ranging from {existing_data.datetime.min()} to {existing_data.datetime.max()}")
+            logger.debug(f"Found existing data {existing_data.datetime.min():%Y-%m-%d %H:%M:%S} - {existing_data.datetime.max():%Y-%m-%d %H:%M:%S} (UTC)")
                         
         # Find gaps in the data
         dt_index = pd.DatetimeIndex(existing_data['datetime']) if not existing_data.empty else pd.DatetimeIndex([])
-        gaps = self.gapfinder.find_data_gaps(dt_index, start_time_round, end_time_round, freq = provider_handler.get_freq(models))
+        gaps = self.gapfinder.find_data_gaps(dt_index, start_time_round, end_time_round, freq = freq)
         
         if not gaps:
-            logger.info("No data gaps found")
+            logger.debug("No data gaps found")
         else:
             logger.debug(f"Found {len(gaps)} data gaps: {gaps}")
         
@@ -243,7 +248,8 @@ class QueryManager:
             station_id=station_id,
             gaps=gaps,
             all_variables = [] if existing_data.empty else [i for i in existing_data.columns if i not in {'station_id', 'datetime', 'model'}],
-            models = models
+            models = models,
+            freq = freq
         )
 
         combined = self._combine_existing_and_new(existing_data, new_data_response)
@@ -251,6 +257,12 @@ class QueryManager:
         new_data_cache = self._filter_cache_recent(new_data_cache)
 
         return combined, new_data_cache
+
+    @staticmethod
+    def _get_provider_freq(provider_handler: BaseMeteoHandler, models: list[str] | None = None) -> str:
+        if hasattr(provider_handler, "get_freq"):
+            return provider_handler.get_freq(models)
+        return provider_handler.freq
 
     @staticmethod
     def _clip_to_range(df: pd.DataFrame, start: datetime, end: datetime) -> pd.DataFrame:
@@ -304,7 +316,7 @@ class QueryManager:
             now_utc = datetime.now(timezone.utc)
             now_floor = pd.Timestamp(now_utc).floor(freq)
             if end_time_round > now_floor:
-                logger.warning(f"Requested end time is in the future. Capping at {now_floor} (UTC)")
+                logger.debug(f"Requested end time is in the future. Capping at {now_floor} (UTC)")
                 end_time_round = now_floor
 
         return start_time_round, end_time_round

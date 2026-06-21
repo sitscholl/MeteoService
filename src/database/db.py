@@ -294,7 +294,7 @@ class MeteoDB:
                 index_label=index_label,
                 if_exists=if_exists
             )
-            logger.info(f"Successfully inserted {len(measurements)} measurement rows across {len(station_id_map)} stations and {len(active_variables)} variables.")
+            logger.debug(f"Inserted {len(measurements)} measurement rows for {len(station_id_map)} stations and {len(active_variables)} variables.")
         except Exception as e:
             logger.error(f"Error inserting bulk measurement data: {e}")
                     

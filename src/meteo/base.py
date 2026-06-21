@@ -79,14 +79,14 @@ class BaseMeteoHandler(ABC):
 
     async def __aenter__(self):
         """Start httpx client that is reused across requests"""
-        logger.info("Opening API session...")
+        logger.debug("Opening API session...")
         self._client = httpx.AsyncClient(timeout = self.timeout)
         await self._authenticate()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Start httpx client that is reused across requests"""
-        logger.info("Closing API session...")
+        logger.debug("Closing API session...")
         if self._client is not None:
             await self._client.aclose()
 
